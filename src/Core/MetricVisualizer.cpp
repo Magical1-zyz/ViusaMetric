@@ -22,7 +22,7 @@ namespace Core {
         // 2. 普通纹理显示 Shader (刚刚新建的那个)
         simpleTextureShader = std::make_unique<Shader>(
                 "assets/shaders/metrics/quad.vert",
-                "assets/shaders/metrics/texture.frag"
+                "assets/shaders/metrics/textures.frag" // <--- 加个 's'，与你实际文件名保持一致
         );
 
         // 3. 图例绘制 Shader

@@ -1,60 +1,58 @@
 #include "Shader.h"
+#include <filesystem>
 
 namespace Core {
 
     Shader::Shader(const char* vertexPath, const char* fragmentPath, const char* geometryPath)
     {
-        // 1. 从文件路径中获取顶点/片段着色器源码
+        // 1. 准备
         std::string vertexCode;
         std::string fragmentCode;
-        std::string geometryCode;
         std::ifstream vShaderFile;
         std::ifstream fShaderFile;
-        std::ifstream gShaderFile;
 
-        // 保证ifstream对象可以抛出异常
+        // 开启异常
         vShaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
         fShaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-        gShaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);
 
         try
         {
+            // [调试] 打印绝对路径，确认程序到底去哪找文件了
+            std::cout << "[Shader] Loading VS: " << std::filesystem::absolute(vertexPath) << std::endl;
+            std::cout << "[Shader] Loading FS: " << std::filesystem::absolute(fragmentPath) << std::endl;
+
             // 打开文件
             vShaderFile.open(vertexPath);
             fShaderFile.open(fragmentPath);
-            std::stringstream vShaderStream, fShaderStream;
 
-            // 读取文件的缓冲内容到数据流中
+            std::stringstream vShaderStream, fShaderStream;
             vShaderStream << vShaderFile.rdbuf();
             fShaderStream << fShaderFile.rdbuf();
 
-            // 关闭文件处理器
             vShaderFile.close();
             fShaderFile.close();
 
-            // 转换流至string
             vertexCode = vShaderStream.str();
             fragmentCode = fShaderStream.str();
 
-            // 如果存在几何着色器，也加载它
-            if(geometryPath != nullptr)
-            {
-                gShaderFile.open(geometryPath);
-                std::stringstream gShaderStream;
-                gShaderStream << gShaderFile.rdbuf();
-                gShaderFile.close();
-                geometryCode = gShaderStream.str();
-            }
+            // [关键] 检查空文件
+            if (vertexCode.empty()) std::cerr << "[ERROR] Vertex shader content is EMPTY: " << vertexPath << std::endl;
+            if (fragmentCode.empty()) std::cerr << "[ERROR] Fragment shader content is EMPTY: " << fragmentPath << std::endl;
         }
         catch (std::ifstream::failure& e)
         {
-            std::cout << "ERROR::SHADER::FILE_NOT_SUCCESFULLY_READ: " << e.what() << std::endl;
+            std::cout << "\n---------------------------------------------------------" << std::endl;
+            std::cout << "ERROR::SHADER::FILE_NOT_SUCCESFULLY_READ" << std::endl;
+            std::cout << "Error Code: " << e.what() << std::endl;
+            std::cout << "Failed File: " << vertexPath << " OR " << fragmentPath << std::endl;
+            std::cout << "Current Working Dir: " << std::filesystem::current_path() << std::endl;
+            std::cout << "---------------------------------------------------------\n" << std::endl;
         }
 
         const char* vShaderCode = vertexCode.c_str();
         const char * fShaderCode = fragmentCode.c_str();
 
-        // 2. 编译着色器
+        // 2. 编译
         unsigned int vertex, fragment;
 
         // Vertex Shader
@@ -69,32 +67,15 @@ namespace Core {
         glCompileShader(fragment);
         checkCompileErrors(fragment, "FRAGMENT");
 
-        // Geometry Shader (如果有)
-        unsigned int geometry;
-        if(geometryPath != nullptr)
-        {
-            const char * gShaderCode = geometryCode.c_str();
-            geometry = glCreateShader(GL_GEOMETRY_SHADER);
-            glShaderSource(geometry, 1, &gShaderCode, NULL);
-            glCompileShader(geometry);
-            checkCompileErrors(geometry, "GEOMETRY");
-        }
-
         // Shader Program
         ID = glCreateProgram();
         glAttachShader(ID, vertex);
         glAttachShader(ID, fragment);
-        if(geometryPath != nullptr)
-            glAttachShader(ID, geometry);
-
         glLinkProgram(ID);
         checkCompileErrors(ID, "PROGRAM");
 
-        // 删除着色器，它们已经链接到我们的程序中了，已经不再需要了
         glDeleteShader(vertex);
         glDeleteShader(fragment);
-        if(geometryPath != nullptr)
-            glDeleteShader(geometry);
     }
 
     Shader::~Shader() {

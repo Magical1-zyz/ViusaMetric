@@ -87,10 +87,3 @@ if(MSVC)
 else()
     target_compile_options(VisualMetrics PRIVATE -Wall -Wextra)
 endif()
-
-# [新增] 编译后自动将 assets 文件夹复制到构建目录
-add_custom_command(TARGET VisualMetrics POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/assets
-        $<TARGET_FILE_DIR:VisualMetrics>/assets
-)

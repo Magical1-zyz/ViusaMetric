@@ -33,9 +33,6 @@ namespace Core {
             // 注意：i 从 0 到 sampleCount-1
             float y = 1.0f - (float)i / (float)(sampleCount - 1);
 
-            // 对应的当前切面半径
-            float radiusAtY = std::sqrt(1.0f - y * y);
-
             // 角度 theta
             float theta = phi * i;
 
