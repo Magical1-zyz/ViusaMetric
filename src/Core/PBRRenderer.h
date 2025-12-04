@@ -36,6 +36,7 @@ namespace Core {
         unsigned int GetColorTexture() const { return colorTex; }
         unsigned int GetNormalTexture() const { return normalTex; }
         unsigned int GetDepthTexture() const { return depthTex; }
+        unsigned int GetFBO() const { return fbo; }
 
         // 读取像素数据用于 CPU 端计算 (MSE/PSNR)
         std::vector<unsigned char> ReadPixelsColor();

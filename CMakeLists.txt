@@ -21,7 +21,6 @@ project(VisualMetric)
 # --- 强制 MSVC 使用 UTF-8 编码，解决乱码警告 ---
 if(MSVC)
     add_compile_options("/utf-8")
-    add_compile_options("/W3")
     add_compile_options("/wd4267") # 屏蔽 size_t 转 int 警告
     add_compile_options("/wd4244") # 屏蔽 double 转 float 警告
 endif()

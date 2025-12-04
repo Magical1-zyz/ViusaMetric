@@ -1,7 +1,8 @@
+#include "Model.h"
+
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-#include "Model.h"
 #include <iostream>
 #include <algorithm>
 #include <filesystem>
@@ -9,6 +10,8 @@
 namespace Core {
 
     Model::Model(std::string const &path) {
+        // [调试] 暂时禁用翻转，排除 UV 倒置导致采样到黑色背景的可能性
+        stbi_set_flip_vertically_on_load(false);
         loadModel(path);
         computeBoundingBox();
     }
@@ -25,8 +28,10 @@ namespace Core {
     void Model::loadModel(std::string const &path) {
         Assimp::Importer importer;
         const aiScene* scene = importer.ReadFile(path,
-                                                 aiProcess_Triangulate | aiProcess_GenSmoothNormals |
-                                                 aiProcess_FlipUVs | aiProcess_CalcTangentSpace |
+                                                 aiProcess_Triangulate |
+                                                 aiProcess_GenSmoothNormals |
+                                                 aiProcess_FlipUVs |
+                                                 aiProcess_CalcTangentSpace |
                                                  aiProcess_JoinIdenticalVertices);
 
         if(!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
@@ -35,7 +40,6 @@ namespace Core {
         }
 
         this->scenePtr = scene;
-        // [修复] 使用 filesystem 自动处理路径分隔符
         std::filesystem::path p(path);
         this->directory = p.parent_path().string();
 
@@ -56,7 +60,9 @@ namespace Core {
         std::vector<Vertex> vertices;
         std::vector<unsigned int> indices;
         std::vector<Texture> textures;
+        MaterialProps matProps;
 
+        // 1. 顶点
         for(unsigned int i = 0; i < mesh->mNumVertices; i++) {
             Vertex vertex;
             glm::vec3 vector;
@@ -69,6 +75,8 @@ namespace Core {
                 vector.y = mesh->mNormals[i].y;
                 vector.z = mesh->mNormals[i].z;
                 vertex.Normal = vector;
+            } else {
+                vertex.Normal = glm::vec3(0.0f, 1.0f, 0.0f);
             }
             if(mesh->mTextureCoords[0]) {
                 glm::vec2 vec;
@@ -91,22 +99,67 @@ namespace Core {
             vertices.push_back(vertex);
         }
 
+        // 2. 索引
         for(unsigned int i = 0; i < mesh->mNumFaces; i++) {
             aiFace face = mesh->mFaces[i];
             for(unsigned int j = 0; j < face.mNumIndices; j++)
                 indices.push_back(face.mIndices[j]);
         }
 
-        aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
+        // 3. 材质
+        if (mesh->mMaterialIndex >= 0) {
+            aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
+            bool hasAlbedo = false;
 
-        std::vector<Texture> diffuseMaps = loadMaterialTextures(material, aiTextureType_DIFFUSE, "albedoMap");
-        textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end());
-        std::vector<Texture> normalMaps = loadMaterialTextures(material, aiTextureType_NORMALS, "normalMap");
-        textures.insert(textures.end(), normalMaps.begin(), normalMaps.end());
-        std::vector<Texture> armMaps = loadMaterialTextures(material, aiTextureType_UNKNOWN, "metallicRoughnessMap");
-        textures.insert(textures.end(), armMaps.begin(), armMaps.end());
+            // [关键修复] 按优先级查找纹理：BaseColor -> Diffuse -> Emissive
+            // 很多烘焙模型把纹理放在 Emissive 通道！
 
-        return Mesh(vertices, indices, textures);
+            // 1. 尝试 BASE_COLOR (PBR)
+            std::vector<Texture> baseMaps = loadMaterialTextures(material, aiTextureType_BASE_COLOR, "albedoMap");
+            if(!baseMaps.empty()) {
+                textures.insert(textures.end(), baseMaps.begin(), baseMaps.end());
+                hasAlbedo = true;
+            }
+
+            // 2. 尝试 DIFFUSE (Legacy)
+            if(!hasAlbedo) {
+                std::vector<Texture> diffuseMaps = loadMaterialTextures(material, aiTextureType_DIFFUSE, "albedoMap");
+                if(!diffuseMaps.empty()) {
+                    textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end());
+                    hasAlbedo = true;
+                }
+            }
+
+            // 3. [新增] 尝试 EMISSIVE (Unlit/Baked)
+            if(!hasAlbedo) {
+                std::vector<Texture> emissiveMaps = loadMaterialTextures(material, aiTextureType_EMISSIVE, "albedoMap");
+                if(!emissiveMaps.empty()) {
+                    textures.insert(textures.end(), emissiveMaps.begin(), emissiveMaps.end());
+                    hasAlbedo = true;
+                    std::cout << "[Model] Found texture in EMISSIVE channel." << std::endl;
+                }
+            }
+
+            // 其他贴图
+            std::vector<Texture> normalMaps = loadMaterialTextures(material, aiTextureType_NORMALS, "normalMap");
+            textures.insert(textures.end(), normalMaps.begin(), normalMaps.end());
+
+            std::vector<Texture> armMaps = loadMaterialTextures(material, aiTextureType_UNKNOWN, "metallicRoughnessMap");
+            textures.insert(textures.end(), armMaps.begin(), armMaps.end());
+
+            // 4. 读取颜色属性
+            aiColor4D color;
+            if (AI_SUCCESS == material->Get(AI_MATKEY_BASE_COLOR, color)) {
+                matProps.baseColor = glm::vec4(color.r, color.g, color.b, color.a);
+            } else if (AI_SUCCESS == material->Get(AI_MATKEY_COLOR_DIFFUSE, color)) {
+                matProps.baseColor = glm::vec4(color.r, color.g, color.b, color.a);
+            }
+            float val;
+            if (AI_SUCCESS == material->Get(AI_MATKEY_METALLIC_FACTOR, val)) matProps.metallic = val;
+            if (AI_SUCCESS == material->Get(AI_MATKEY_ROUGHNESS_FACTOR, val)) matProps.roughness = val;
+        }
+
+        return Mesh(vertices, indices, textures, matProps);
     }
 
     std::vector<Texture> Model::loadMaterialTextures(aiMaterial *mat, aiTextureType type, std::string typeName) {
@@ -133,7 +186,6 @@ namespace Core {
         return textures;
     }
 
-    // [修改] 带有白色备用纹理的加载函数
     unsigned int Model::TextureFromFile(const char *path, const std::string &texDirectory, const aiScene* scene) {
         std::string filename = std::string(path);
         unsigned int textureID;
@@ -155,7 +207,6 @@ namespace Core {
                 data = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTex->pcData), embeddedTex->mWidth * embeddedTex->mHeight * 4, &width, &height, &nrComponents, 0);
             }
         } else {
-            // 使用 filesystem 拼接路径
             std::filesystem::path p = std::filesystem::path(texDirectory) / filename;
             data = stbi_load(p.string().c_str(), &width, &height, &nrComponents, 0);
         }
@@ -169,23 +220,18 @@ namespace Core {
             glBindTexture(GL_TEXTURE_2D, textureID);
             glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
             glGenerateMipmap(GL_TEXTURE_2D);
-
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
             stbi_image_free(data);
         } else {
-            // [关键] 如果加载失败，生成白色纹理，防止黑屏
-            std::cout << "[Warning] Missing Texture: " << path << " -> Using WHITE fallback." << std::endl;
-            unsigned char whitePixel[] = { 255, 255, 255, 255 };
+            std::cout << "[Error] Texture failed to load: " << path << std::endl;
+            // 加载失败时生成粉色纹理，方便调试
+            unsigned char pink[] = { 255, 0, 255, 255 };
             glBindTexture(GL_TEXTURE_2D, textureID);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, whitePixel);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pink);
         }
-
         return textureID;
     }
 
@@ -212,6 +258,6 @@ namespace Core {
         modelMatrix = glm::mat4(1.0f);
         modelMatrix = glm::scale(modelMatrix, glm::vec3(scaleFactor));
         modelMatrix = glm::translate(modelMatrix, -center);
-        std::cout << "Model Normalized. Center: (" << center.x << ", " << center.y << ", " << center.z << ") Scale: " << scaleFactor << std::endl;
+        std::cout << "Model Normalized. Center: " << center.x << " Scale: " << scaleFactor << std::endl;
     }
 }

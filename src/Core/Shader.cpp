@@ -10,6 +10,7 @@ namespace Core {
         std::string fragmentCode;
         std::ifstream vShaderFile;
         std::ifstream fShaderFile;
+        (void) geometryPath;
 
         // 开启异常
         vShaderFile.exceptions(std::ifstream::failbit | std::ifstream::badbit);

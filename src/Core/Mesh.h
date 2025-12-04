@@ -1,12 +1,10 @@
 #pragma once
-
 #include <glad/glad.h>
 #include <glm/glm.hpp>
 #include <string>
 #include <vector>
 
 namespace Core {
-
     struct Vertex {
         glm::vec3 Position;
         glm::vec3 Normal;
@@ -14,11 +12,15 @@ namespace Core {
         glm::vec3 Tangent;
         glm::vec3 Bitangent;
     };
-
     struct Texture {
         unsigned int id;
         std::string type;
         std::string path;
+    };
+    struct MaterialProps {
+        glm::vec4 baseColor = glm::vec4(1.0f);
+        float metallic = 0.0f;
+        float roughness = 0.5f;
     };
 
     class Mesh {
@@ -26,49 +28,64 @@ namespace Core {
         std::vector<Vertex>       vertices;
         std::vector<unsigned int> indices;
         std::vector<Texture>      textures;
+        MaterialProps             matProps;
         unsigned int VAO;
 
-        Mesh(std::vector<Vertex> vertices, std::vector<unsigned int> indices, std::vector<Texture> textures) {
+        Mesh(std::vector<Vertex> vertices, std::vector<unsigned int> indices, std::vector<Texture> textures, MaterialProps props) {
             this->vertices = vertices;
             this->indices = indices;
             this->textures = textures;
+            this->matProps = props;
             setupMesh();
         }
 
-        // [修改重点] Draw 函数
         void Draw(unsigned int shaderProgram) {
-            // ---------------------------------------------------------
-            // 关键修复：偏移纹理单元索引
-            // IBL 占用了 0 (Irradiance), 1 (Prefilter), 2 (BRDF)
-            // 所以模型材质纹理必须从 3 号单元开始绑定！
-            // ---------------------------------------------------------
-            unsigned int baseUnit = 3;
+            const unsigned int SLOT_ALBEDO = 3;
+            const unsigned int SLOT_NORMAL = 4;
+            const unsigned int SLOT_MR     = 5;
+
+            bool hasAlbedo = false;
+            bool hasNormal = false;
+            bool hasMR     = false;
 
             for(unsigned int i = 0; i < textures.size(); i++) {
-                // 激活纹理单元 3, 4, 5...
-                glActiveTexture(GL_TEXTURE0 + baseUnit + i);
-
                 std::string name = textures[i].type;
-
-                // 告诉 Shader 这个采样器属于哪个纹理单元
-                glUniform1i(glGetUniformLocation(shaderProgram, name.c_str()), baseUnit + i);
-
-                // 绑定纹理
-                glBindTexture(GL_TEXTURE_2D, textures[i].id);
+                if(name == "albedoMap") {
+                    glActiveTexture(GL_TEXTURE0 + SLOT_ALBEDO);
+                    glBindTexture(GL_TEXTURE_2D, textures[i].id);
+                    glUniform1i(glGetUniformLocation(shaderProgram, "albedoMap"), SLOT_ALBEDO);
+                    hasAlbedo = true;
+                } else if(name == "normalMap") {
+                    glActiveTexture(GL_TEXTURE0 + SLOT_NORMAL);
+                    glBindTexture(GL_TEXTURE_2D, textures[i].id);
+                    glUniform1i(glGetUniformLocation(shaderProgram, "normalMap"), SLOT_NORMAL);
+                    hasNormal = true;
+                } else if(name == "metallicRoughnessMap") {
+                    glActiveTexture(GL_TEXTURE0 + SLOT_MR);
+                    glBindTexture(GL_TEXTURE_2D, textures[i].id);
+                    glUniform1i(glGetUniformLocation(shaderProgram, "metallicRoughnessMap"), SLOT_MR);
+                    hasMR = true;
+                }
             }
 
-            // 绘制网格
+            // 显式更新状态，防止残留
+            glUniform1i(glGetUniformLocation(shaderProgram, "hasAlbedoMap"), hasAlbedo);
+            glUniform1i(glGetUniformLocation(shaderProgram, "hasNormalMap"), hasNormal);
+            glUniform1i(glGetUniformLocation(shaderProgram, "hasMRMap"), hasMR);
+
+            // 传递兜底颜色
+            glUniform3f(glGetUniformLocation(shaderProgram, "u_AlbedoDefault"), matProps.baseColor.r, matProps.baseColor.g, matProps.baseColor.b);
+            glUniform1f(glGetUniformLocation(shaderProgram, "u_RoughnessDefault"), matProps.roughness);
+            glUniform1f(glGetUniformLocation(shaderProgram, "u_MetallicDefault"), matProps.metallic);
+
             glBindVertexArray(VAO);
             glDrawElements(GL_TRIANGLES, static_cast<unsigned int>(indices.size()), GL_UNSIGNED_INT, 0);
             glBindVertexArray(0);
-
-            // 恢复默认活动单元，是个好习惯
             glActiveTexture(GL_TEXTURE0);
         }
 
     private:
         unsigned int VBO, EBO;
-
         void setupMesh() {
             glGenVertexArrays(1, &VAO);
             glGenBuffers(1, &VBO);
@@ -78,18 +95,11 @@ namespace Core {
             glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), &vertices[0], GL_STATIC_DRAW);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
             glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), &indices[0], GL_STATIC_DRAW);
-
-            // 顶点属性布局保持不变
-            glEnableVertexAttribArray(0);
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
-            glEnableVertexAttribArray(1);
-            glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Normal));
-            glEnableVertexAttribArray(2);
-            glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, TexCoords));
-            glEnableVertexAttribArray(3);
-            glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Tangent));
-            glEnableVertexAttribArray(4);
-            glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Bitangent));
+            glEnableVertexAttribArray(0); glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
+            glEnableVertexAttribArray(1); glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Normal));
+            glEnableVertexAttribArray(2); glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, TexCoords));
+            glEnableVertexAttribArray(3); glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Tangent));
+            glEnableVertexAttribArray(4); glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Bitangent));
             glBindVertexArray(0);
         }
     };

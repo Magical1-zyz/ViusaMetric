@@ -1,5 +1,4 @@
 #version 330 core
-// MRT 输出：0=颜色图(用于PSNR), 1=法线图(用于ND和SD)
 layout (location = 0) out vec4 FragColor;
 layout (location = 1) out vec3 FragNormalMap;
 
@@ -10,30 +9,35 @@ in VS_OUT {
     mat3 TBN;
 } fs_in;
 
-// --- 材质输入 ---
-// 贴图
-uniform sampler2D albedoMap;
-uniform sampler2D normalMap;
-uniform sampler2D metallicRoughnessMap; // glTF通常是 G=Roughness, B=Metallic
+// --- Textures ---
+uniform sampler2D albedoMap;            // Slot 3
+uniform sampler2D normalMap;            // Slot 4
+uniform sampler2D metallicRoughnessMap; // Slot 5
 
-// 开关与默认值 (用于 Base 模型)
+// --- Switches ---
+uniform bool hasAlbedoMap;
 uniform bool hasNormalMap;
-uniform bool hasMRMap;      // 是否有金属/粗糙度贴图
+uniform bool hasMRMap;
 
-uniform vec3  u_AlbedoDefault;    // 如果没有 albedo 贴图时的颜色
-uniform float u_RoughnessDefault; // Base 模型建议设为 0.9-1.0
-uniform float u_MetallicDefault;  // Base 模型建议设为 0.0
+// --- Settings ---
+uniform int u_ShadingModel; // 0=Lit, 1=Unlit
+uniform vec3  u_AlbedoDefault;
+uniform float u_RoughnessDefault;
+uniform float u_MetallicDefault;
 
-// --- IBL 输入 (由预处理阶段生成) ---
-uniform samplerCube irradianceMap;
-uniform samplerCube prefilterMap;
-uniform sampler2D   brdfLUT;
-
+// --- IBL ---
+uniform samplerCube irradianceMap; // Slot 0
+uniform samplerCube prefilterMap;  // Slot 1
+uniform sampler2D   brdfLUT;       // Slot 2
 uniform vec3 camPos;
+
+// --- Fixes ---
+uniform float u_Exposure;
+uniform mat3  u_EnvRotation; // [NEW] Rotate IBL to match UE coordinates
 
 const float PI = 3.14159265359;
 
-// --- PBR 辅助函数 ---
+// --- PBR Functions ---
 float DistributionGGX(vec3 N, vec3 H, float roughness) {
     float a = roughness*roughness;
     float a2 = a*a;
@@ -44,7 +48,6 @@ float DistributionGGX(vec3 N, vec3 H, float roughness) {
     denom = PI * denom * denom;
     return nom / max(denom, 0.0000001);
 }
-
 float GeometrySchlickGGX(float NdotV, float roughness) {
     float r = (roughness + 1.0);
     float k = (r*r) / 8.0;
@@ -52,7 +55,6 @@ float GeometrySchlickGGX(float NdotV, float roughness) {
     float denom = NdotV * (1.0 - k) + k;
     return nom / max(denom, 0.0000001);
 }
-
 float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
     float NdotV = max(dot(N, V), 0.0);
     float NdotL = max(dot(N, L), 0.0);
@@ -60,77 +62,85 @@ float GeometrySmith(vec3 N, vec3 V, vec3 L, float roughness) {
     float ggx1 = GeometrySchlickGGX(NdotL, roughness);
     return ggx1 * ggx2;
 }
-
 vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness) {
     return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+}
+vec3 ACESFilmicToneMapping(vec3 x) {
+    float a = 2.51f; float b = 0.03f; float c = 2.43f; float d = 0.59f; float e = 0.14f;
+    return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
 }
 
 void main()
 {
-    // 1. 获取材质属性
-    vec3 albedo = texture(albedoMap, fs_in.TexCoords).rgb;
-    // 如果是 Base 模型，albedoMap 依然有效，但 MR 和 Normal 可能无效
-
-    float metallic;
-    float roughness;
-
-    if (hasMRMap) {
-        // glTF 标准: B=Metallic, G=Roughness
-        vec4 mrSample = texture(metallicRoughnessMap, fs_in.TexCoords);
-        roughness = mrSample.g;
-        metallic = mrSample.b;
+    // 1. Albedo
+    vec3 albedo;
+    if (hasAlbedoMap) {
+        vec3 sRGB = texture(albedoMap, fs_in.TexCoords).rgb;
+        albedo = pow(sRGB, vec3(2.2));
     } else {
-        // Base 模型使用 Uniform 默认值
-        roughness = u_RoughnessDefault;
-        metallic = u_MetallicDefault;
+        albedo = u_AlbedoDefault;
     }
 
-    vec3 N;
-    if (hasNormalMap) {
-        vec3 tangentNormal = texture(normalMap, fs_in.TexCoords).rgb;
-        tangentNormal = tangentNormal * 2.0 - 1.0;
-        N = normalize(fs_in.TBN * tangentNormal);
-    } else {
-        N = normalize(fs_in.Normal);
+    vec3 finalColor = vec3(0.0);
+    vec3 N_out = normalize(fs_in.Normal);
+
+    // --- Mode 1: Unlit (OptModel) ---
+    if (u_ShadingModel == 1) {
+        finalColor = albedo;
+        N_out = normalize(fs_in.Normal);
+    }
+    // --- Mode 0: Lit (RefModel) ---
+    else {
+        float metallic, roughness;
+        if (hasMRMap) {
+            vec4 mrSample = texture(metallicRoughnessMap, fs_in.TexCoords);
+            roughness = mrSample.g;
+            metallic = mrSample.b;
+        } else {
+            roughness = u_RoughnessDefault;
+            metallic = u_MetallicDefault;
+        }
+
+        vec3 N;
+        if (hasNormalMap) {
+            vec3 tangentNormal = texture(normalMap, fs_in.TexCoords).rgb;
+            tangentNormal = tangentNormal * 2.0 - 1.0;
+            N = normalize(fs_in.TBN * tangentNormal);
+        } else {
+            N = normalize(fs_in.Normal);
+        }
+        N_out = N;
+
+        vec3 V = normalize(camPos - fs_in.WorldPos);
+        vec3 R = reflect(-V, N);
+        vec3 F0 = vec3(0.04);
+        F0 = mix(F0, albedo, metallic);
+
+        vec3 F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
+        vec3 kS = F;
+        vec3 kD = 1.0 - kS;
+        kD *= 1.0 - metallic;
+
+        // [Fix] Rotate Normal/Reflection vector to match UE HDR coordinates
+        vec3 rotN = u_EnvRotation * N;
+        vec3 rotR = u_EnvRotation * R;
+
+        vec3 irradiance = texture(irradianceMap, rotN).rgb;
+        vec3 diffuse    = irradiance * albedo;
+
+        const float MAX_REFLECTION_LOD = 4.0;
+        vec3 prefilteredColor = textureLod(prefilterMap, rotR,  roughness * MAX_REFLECTION_LOD).rgb;
+        vec2 brdf  = texture(brdfLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
+        vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
+
+        finalColor = (kD * diffuse + specular);
     }
 
-    vec3 V = normalize(camPos - fs_in.WorldPos);
-    vec3 R = reflect(-V, N);
+    // --- Post Process ---
+    finalColor *= u_Exposure;
+    finalColor = ACESFilmicToneMapping(finalColor);
+    finalColor = pow(finalColor, vec3(1.0/2.2));
 
-    // 2. IBL 计算 (环境光照)
-    vec3 F0 = vec3(0.04);
-    F0 = mix(F0, albedo, metallic);
-
-    vec3 F = fresnelSchlickRoughness(max(dot(N, V), 0.0), F0, roughness);
-
-    vec3 kS = F;
-    vec3 kD = 1.0 - kS;
-    kD *= 1.0 - metallic;
-
-    // 漫反射部分 (Irradiance)
-    vec3 irradiance = texture(irradianceMap, N).rgb;
-    vec3 diffuse    = irradiance * albedo;
-
-    // 镜面反射部分 (Prefilter + LUT)
-    const float MAX_REFLECTION_LOD = 4.0;
-    vec3 prefilteredColor = textureLod(prefilterMap, R,  roughness * MAX_REFLECTION_LOD).rgb;
-    vec2 brdf  = texture(brdfLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
-    vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
-
-    // 简单组合 AO (这里假设没有AO贴图，设为1)
-    float ao = 1.0;
-    vec3 ambient = (kD * diffuse + specular) * ao;
-
-    vec3 color = ambient;
-
-    // HDR Tone Mapping & Gamma Correction
-    color = color / (color + vec3(1.0));
-    color = pow(color, vec3(1.0/2.2));
-
-    // --- Output 0: PBR 图像 ---
-    FragColor = vec4(color, 1.0);
-
-    // --- Output 1: 归一化法线图 ---
-    // 映射 [-1, 1] -> [0, 1]
-    FragNormalMap = (N + 1.0) * 0.5;
+    FragColor = vec4(finalColor, 1.0);
+    FragNormalMap = (N_out + 1.0) * 0.5;
 }

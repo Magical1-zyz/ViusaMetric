@@ -20,22 +20,23 @@ namespace Metrics {
         }
 
         double sumSqDiff = 0.0;
-
-        // numChannels 之前被计算但没使用，直接删掉或用于检查
-        // size_t numChannels = img1.size() / (width * height);
+        size_t totalPixels = img1.size();
 
         // 1. 计算 MSE
-        for (size_t i = 0; i < img1.size(); ++i) {
-            double diff = static_cast<double>(img1[i]) - static_cast<double>(img2[i]);
+        for (size_t i = 0; i < totalPixels; ++i) {
+            double v1 = static_cast<double>(img1[i]) / 255.0;
+            double v2 = static_cast<double>(img2[i]) / 255.0;
+
+            double diff = v1 - v2;
             sumSqDiff += diff * diff;
         }
 
-        double mse = sumSqDiff / (double)img1.size();
+        double mse = sumSqDiff / (double)totalPixels;
 
-        // 2. 计算 PSNR (MAX=255.0)
-        if (mse < 1e-9) return {0.0, 99.99};
+        // 2. 计算 PSNR
+        if (mse < 1e-10) return {0.0, 99.99}; // 避免除以零，表示完全相同
 
-        double maxVal = 255.0;
+        double maxVal = 1.0;
         double psnr = 10.0 * std::log10((maxVal * maxVal) / mse);
 
         return {mse, psnr};
@@ -53,12 +54,24 @@ namespace Metrics {
         if (nMap1.size() != nMap2.size()) return 0.0;
 
         double sumSqDiff = 0.0;
-        for (size_t i = 0; i < nMap1.size(); ++i) {
-            double diff = nMap1[i] - nMap2[i];
+        size_t totalComponents = nMap1.size();
+
+        for (size_t i = 0; i < totalComponents; ++i) {
+            // 假设 nMap 中的原始数据是世界空间法线 (范围 -1 到 1)
+            double n1 = static_cast<double>(nMap1[i]);
+            double n2 = static_cast<double>(nMap2[i]);
+
+            double rgb1 = (n1 + 1.0) * 0.5;
+            double rgb2 = (n2 + 1.0) * 0.5;
+
+            // 钳制在 [0,1] 范围内，防止浮点误差导致的轻微越界
+            // (虽然理论上 n 在 -1~1 之间，但安全起见可以 clamp，这里为了性能暂略，假设数据合法)
+
+            double diff = rgb1 - rgb2;
             sumSqDiff += diff * diff;
         }
 
-        return sumSqDiff / (double)nMap1.size();
+        return sumSqDiff / totalComponents;
     }
 
     double Evaluator::ComputeSilhouetteError(
