@@ -90,27 +90,44 @@ $$L_{sd} = \frac{1}{N} \sum_{k=1}^{N} MSE \left( S_{ref}^{(k)}, S_{opt}^{(k)} \r
 ##  4. 工程目录结构
 ```text
 VisualMetrics/
-├── CMakeLists.txt              # CMake 构建配置
-├── assets/                     # [资源根目录] (必须与可执行文件相对路径正确)
-│   ├── hdrtextures/            # 存放 .hdr 环境贴图
-│   ├── refmodel/               # 原始高模 (支持 .gltf, .glb, .obj)
-│   ├── optmodel/              # 优化低模 (必须与 refmodel 同名)
-│   └── shaders/                # 着色器源码
-├── src/
-│   ├── main.cpp                # 主程序入口 (资源查找、批处理循环)
-│   ├── Core/                   # 核心引擎模块
-│   │   ├── CameraSampler.h/cpp # 摄像机生成逻辑
-│   │   ├── GeometryUtils.h/cpp # 几何体绘制 (Quad, Cube)
-│   │   ├── Mesh.h              # 网格数据结构 (纹理单元管理)
-│   │   ├── Model.h/cpp         # 模型加载 (Assimp封装, 纹理容错)
-│   │   ├── PBRRenderer.h/cpp   # 渲染管线
-│   │   ├── Shader.h/cpp        # Shader 编译与链接
-│   │   └── MetricVisualizer.h/cpp # 结果可视化
-│   └── Metrics/                # 指标算法模块
-│       ├── Evaluator.h/cpp     # PSNR/MSE 统计计算
-│       └── ImageUtils.h/cpp    # CPU端图像处理 (梯度计算)
-├── third_party/                # 第三方库 (stb_image 等)
-└── output/                     # [输出] 结果保存目录
+├── CMakeLists.txt                # CMake 构建脚本 (已配置 PCH 和自动源文件查找)
+├── assets/                       # [资源根目录]
+│   ├── hdrtextures/              # HDR 环境贴图
+│   ├── refmodel/                 # 参考高模
+│   ├── optmodel/                 # 待测低模
+│   └── shaders/                  # 着色器源码
+├── output/                       # [输出] 渲染截图或评估报告
+├── third_party/                  # 第三方库源码
+│   └── stb/                      # stb_image, stb_image_write
+├── src/                          # 源代码根目录
+│   ├── main.cpp                  # 程序入口 (仅负责实例化 App)
+│   ├── pch.h                     # 预编译头文件 (GLM, GLFW, STL)
+│   ├── App/                      # [模块] 应用程序逻辑
+│   │   ├── Application.h/cpp     # 主控类 (初始化, 渲染循环, 状态管理)
+│   │   └── Config.h              # 全局配置 (分辨率, 路径常量)
+│   │
+│   ├── Scene/                    # [模块] 场景与数据
+│   │   ├── Scene.h               # 场景容器 (持有 Model 和 IBLMaps)
+│   │   ├── Model.h/cpp           # 模型加载 (Assimp 封装)
+│   │   ├── Mesh.h                # 网格数据结构
+│   │   └── CameraSampler.h/cpp   # 相机采样逻辑 (斐波那契球)
+│   │
+│   ├── Renderer/                 # [模块] 渲染管线
+│   │   ├── PBRRenderer.h/cpp     # PBR 渲染器 (只负责画)
+│   │   ├── IBLBaker.h/cpp        # IBL 预计算 (烘焙 Irradiance/Prefilter)
+│   │   └── Shader.h/cpp          # Shader 编译工具
+│   │
+│   ├── Resources/                # [模块] 资源管理
+│   │   └── ResourceManager.h/cpp # 模型/纹理缓存管理
+│   │
+│   ├── Metrics/                  # [模块] 评估与可视化
+│   │   ├── MetricVisualizer.h/cpp# 分屏对比与误差热力图绘制
+│   │   ├── Evaluator.h/cpp       # 误差计算逻辑
+│   │   └── ImageUtils.h/cpp      # 图像处理辅助
+│   │
+│   └── Utils/                    # [模块] 通用工具
+│       ├── FileSystemUtils.h     # 文件路径搜索工具
+│       └── GeometryUtils.h/cpp   # 基础几何体 (Cube, Quad)
 ```
 
 

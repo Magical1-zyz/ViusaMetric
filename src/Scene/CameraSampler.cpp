@@ -1,10 +1,7 @@
-#include "CameraSampler.h"
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtc/constants.hpp>
-#include <cmath>
-#include <random>
+#include "Scene/CameraSampler.h"
 
-namespace Core {
+
+namespace Scene {
 
     float CameraSampler::CalculateAdaptiveFOV(float modelRadius, float cameraDistance) {
         if (cameraDistance <= modelRadius) return 90.0f;

@@ -1,7 +1,4 @@
 #include "Evaluator.h"
-#include <algorithm>
-#include <iostream>
-#include <cmath>
 
 namespace Metrics {
 

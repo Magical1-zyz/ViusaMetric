@@ -1,8 +1,7 @@
 #pragma once
-#include "Shader.h"
-#include <vector>
+#include "Renderer/Shader.h"
 
-namespace Core {
+namespace Metrics {
     class MetricVisualizer {
     public:
         MetricVisualizer(int scrWidth, int scrHeight);
@@ -17,10 +16,10 @@ namespace Core {
         int width, height;
         unsigned int quadVAO = 0;
 
-        std::unique_ptr<Shader> errorVisShader;
-        std::unique_ptr<Shader> simpleTextureShader;
-        std::unique_ptr<Shader> legendShader;
-        std::unique_ptr<Shader> compositeShader;
+        std::unique_ptr<Renderer::Shader> errorVisShader;
+        std::unique_ptr<Renderer::Shader> simpleTextureShader;
+        std::unique_ptr<Renderer::Shader> legendShader;
+        std::unique_ptr<Renderer::Shader> compositeShader;
 
         void RenderQuad();
     };

@@ -1,7 +1,6 @@
 #pragma once
-#include <glad/glad.h>
 
-namespace Core {
+namespace Utils {
     class GeometryUtils {
     public:
         // 绘制单位立方体 (用于天空盒、IBL卷积)

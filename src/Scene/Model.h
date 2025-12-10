@@ -1,18 +1,10 @@
 #pragma once
 
-#include <glad/glad.h>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <assimp/Importer.hpp>
 #include <assimp/scene.h>
-#include <assimp/postprocess.h>
+#include "Scene/Mesh.h" // 包含 Mesh 定义 (Vertex, Texture, MaterialProps)
 
-#include "Mesh.h" // 包含 Mesh 定义 (Vertex, Texture, MaterialProps)
-#include <string>
-#include <vector>
 
-namespace Core {
+namespace Scene {
 
     class Model {
     public:

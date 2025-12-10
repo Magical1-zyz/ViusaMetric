@@ -1,13 +1,11 @@
-#include "Model.h"
+#include <assimp/Importer.hpp>
+#include <assimp/postprocess.h>
+#include "Scene/Model.h"
 
 #define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
+#include "stb_image.h"
 
-#include <iostream>
-#include <algorithm>
-#include <filesystem>
-
-namespace Core {
+namespace Scene {
 
     Model::Model(std::string const &path) {
         // [调试] 暂时禁用翻转，排除 UV 倒置导致采样到黑色背景的可能性
@@ -196,7 +194,7 @@ namespace Core {
 
         const aiTexture* embeddedTex = nullptr;
         if (path[0] == '*') {
-            int index = std::stoi(filename.substr(1));
+            size_t index = std::stoi(filename.substr(1));
             if (index < scene->mNumTextures) embeddedTex = scene->mTextures[index];
         }
 

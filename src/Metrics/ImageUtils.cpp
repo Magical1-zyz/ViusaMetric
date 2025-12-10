@@ -1,8 +1,4 @@
 #include "ImageUtils.h"
-#include <cmath>
-#include <algorithm>
-#include <iostream>
-#include <glm/glm.hpp>
 
 namespace Metrics {
 

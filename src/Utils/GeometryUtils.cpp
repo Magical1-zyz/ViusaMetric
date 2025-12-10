@@ -1,6 +1,6 @@
 #include "GeometryUtils.h"
 
-namespace Core {
+namespace Utils {
 
     unsigned int GeometryUtils::cubeVAO = 0;
     unsigned int GeometryUtils::cubeVBO = 0;

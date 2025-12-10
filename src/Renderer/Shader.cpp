@@ -1,7 +1,6 @@
 #include "Shader.h"
-#include <filesystem>
 
-namespace Core {
+namespace Renderer {
 
     Shader::Shader(const char* vertexPath, const char* fragmentPath, const char* geometryPath)
     {

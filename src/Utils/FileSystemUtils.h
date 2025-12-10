@@ -1,0 +1,31 @@
+#pragma once
+
+namespace Utils {
+    namespace fs = std::filesystem;
+
+    inline bool SetupWorkingDirectory() {
+        fs::path current = fs::current_path();
+        for (int i = 0; i < 5; ++i) {
+            if (fs::exists(current / "assets/shaders/pbr/pbr.vert")) {
+                fs::current_path(current);
+                return true;
+            }
+            if (current.has_parent_path()) current = current.parent_path();
+            else break;
+        }
+        return false;
+    }
+
+    inline std::string FindFirstFileByExt(const std::string& folder, const std::vector<std::string>& extensions) {
+        if (!fs::exists(folder)) return "";
+        for (const auto& entry : fs::recursive_directory_iterator(folder)) {
+            if (entry.is_directory()) continue;
+            std::string ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            for (const auto& target : extensions) {
+                if (ext == target) return entry.path().string();
+            }
+        }
+        return "";
+    }
+}

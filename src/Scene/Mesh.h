@@ -1,10 +1,7 @@
 #pragma once
-#include <glad/glad.h>
-#include <glm/glm.hpp>
-#include <string>
-#include <vector>
 
-namespace Core {
+
+namespace Scene {
     struct Vertex {
         glm::vec3 Position;
         glm::vec3 Normal;

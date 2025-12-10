@@ -1,8 +1,8 @@
 #include "MetricVisualizer.h"
-#include "GeometryUtils.h" // 引入几何工具类
-#include <iostream>
+#include "Utils/GeometryUtils.h" // 引入几何工具类
 
-namespace Core {
+
+namespace Metrics {
 
     // ---------------------------------------------------------
     // 1. 构造函数实现 (修复 LNK2019 错误)
@@ -14,25 +14,25 @@ namespace Core {
         // 注意：这里假设 quad.vert 是通用的屏幕四边形顶点着色器
 
         // 1. 误差热力图 Shader
-        errorVisShader = std::make_unique<Shader>(
+        errorVisShader = std::make_unique<Renderer::Shader>(
                 "assets/shaders/metrics/quad.vert",
                 "assets/shaders/metrics/error_vis.frag"
         );
 
         // 2. 普通纹理显示 Shader (刚刚新建的那个)
-        simpleTextureShader = std::make_unique<Shader>(
+        simpleTextureShader = std::make_unique<Renderer::Shader>(
                 "assets/shaders/metrics/quad.vert",
                 "assets/shaders/metrics/textures.frag" // <--- 加个 's'，与你实际文件名保持一致
         );
 
         // 3. 图例绘制 Shader
-        legendShader = std::make_unique<Shader>(
+        legendShader = std::make_unique<Renderer::Shader>(
                 "assets/shaders/metrics/quad.vert",
                 "assets/shaders/metrics/legend.frag"
         );
 
         // 4. 合成Shader
-        compositeShader = std::make_unique<Shader>("assets/shaders/metrics/quad.vert", "assets/shaders/metrics/composite.frag");
+        compositeShader = std::make_unique<Renderer::Shader>("assets/shaders/metrics/quad.vert", "assets/shaders/metrics/composite.frag");
 
         compositeShader->use();
         errorVisShader->setInt("texRef", 0);
@@ -101,7 +101,7 @@ namespace Core {
     void MetricVisualizer::RenderQuad() {
         // 直接复用 GeometryUtils 中的静态方法
         // 这样避免了重复创建 VAO/VBO
-        GeometryUtils::RenderQuad();
+        Utils::GeometryUtils::RenderQuad();
     }
 
     void MetricVisualizer::RenderComposite(unsigned int refTex, unsigned int optTex, int mode) {
@@ -115,6 +115,6 @@ namespace Core {
         glBindTexture(GL_TEXTURE_2D, optTex);
 
         // 绘制全屏四边形
-        GeometryUtils::RenderQuad();
+        Utils::GeometryUtils::RenderQuad();
     }
 }
