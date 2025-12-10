@@ -58,6 +58,8 @@ set(STB_SOURCES
         "third_party/stb/stb_image.h"
         "third_party/stb/stb_image_write.h"
         third_party/stb/stb_image_write.h
+        src/Core/Application.cpp
+        src/Core/Application.h
 )
 
 # ---------------------------------------------------------

@@ -31,6 +31,14 @@ namespace Core {
                 "assets/shaders/metrics/legend.frag"
         );
 
+        // 4. 合成Shader
+        compositeShader = std::make_unique<Shader>("assets/shaders/metrics/quad.vert", "assets/shaders/metrics/composite.frag");
+
+        compositeShader->use();
+        errorVisShader->setInt("texRef", 0);
+        errorVisShader->setInt("texBase", 1);
+
+
         // 配置纹理单元 (如果不配置，默认为0也行，但显式配置更安全)
         errorVisShader->use();
         errorVisShader->setInt("texRef", 0);
@@ -93,6 +101,20 @@ namespace Core {
     void MetricVisualizer::RenderQuad() {
         // 直接复用 GeometryUtils 中的静态方法
         // 这样避免了重复创建 VAO/VBO
+        GeometryUtils::RenderQuad();
+    }
+
+    void MetricVisualizer::RenderComposite(unsigned int refTex, unsigned int optTex, int mode) {
+        compositeShader->use();
+        compositeShader->setInt("viewMode", mode);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, refTex);
+
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, optTex);
+
+        // 绘制全屏四边形
         GeometryUtils::RenderQuad();
     }
 }
