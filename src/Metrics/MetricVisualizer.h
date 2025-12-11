@@ -9,7 +9,7 @@ namespace Metrics {
         // 计算并绘制最终的组合图
         // texRef/texBase: 从 PBRRenderer 得到的纹理 ID
         // mode: 0=PSNR(Color), 1=ND(Normal), 2=SD(Depth+Normal)
-        void RenderComparison(unsigned int texRef, unsigned int texBase, int mode);
+        void RenderComparison(unsigned int texRef, unsigned int texBase, unsigned int texHeatmap);
         void RenderComposite(unsigned int refTex, unsigned int optTex, int mode);
 
     private:

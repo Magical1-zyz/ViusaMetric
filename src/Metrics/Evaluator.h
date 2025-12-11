@@ -45,5 +45,20 @@ namespace Metrics {
                 const std::vector<unsigned char>& sil2,
                 int width, int height
         );
+
+        // 成热力图数据 (返回 RGBA 字节流)
+        // mode: 0=Color(PSNR), 1=Normal, 2=Silhouette
+        static std::vector<unsigned char> GenerateHeatmap(
+                const std::vector<unsigned char>& refBytes,
+                const std::vector<float>& refFloats, // 法线需要浮点数据，不需要时传空
+                const std::vector<unsigned char>& optBytes,
+                const std::vector<float>& optFloats,
+                int width, int height,
+                int mode
+        );
+
+    private:
+        // 热力图颜色映射 (Value 0.0-1.0 -> R,G,B)
+        static void ValueToColor(float value, unsigned char& r, unsigned char& g, unsigned char& b);
     };
 }

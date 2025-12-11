@@ -44,7 +44,7 @@ include_directories(third_party/stb)
 # 自动查找 src 下所有 .cpp 和 .h (包括子目录)
 file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.h")
 
-# [修正] 这里只放 src 目录之外的第三方文件
+# 这里只放 src 目录之外的第三方文件
 set(STB_SOURCES
         "third_party/stb/stb_image.h"
         "third_party/stb/stb_image_write.h"
