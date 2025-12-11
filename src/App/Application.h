@@ -1,4 +1,5 @@
 #pragma once
+#include "App/Config.h"
 #include "Scene/Scene.h"
 
 // 前置声明
@@ -9,7 +10,7 @@ struct GLFWwindow;
 
 class Application {
 public:
-    Application(int width, int height, const char* title);
+    explicit Application(const AppConfig& config);
     ~Application();
 
     Application(const Application&) = delete;
@@ -26,10 +27,11 @@ private:
         FINISHED = 3
     };
 
+    // --- 保存全局配置 ---
+    AppConfig config;
+
     // --- 窗口与系统 ---
     GLFWwindow* window = nullptr;
-    int scrWidth, scrHeight;
-    const char* appTitle;
     Scene::Scene scene;
 
     // --- 子模块 ---
@@ -41,8 +43,8 @@ private:
         unsigned int texRef = 0;
         unsigned int texOpt = 0;
         unsigned int texHeatmap = 0;
-        int width = 1024;
-        int height = 1024;
+        int width = 0;
+        int height = 0;
         void Init(int w, int h);
         void Cleanup();
     } targets;
@@ -54,10 +56,10 @@ private:
 
     RenderPhase currentPhase = RenderPhase::PHASE_IBL_PSNR;
     double accumulatorError = 0.0;      // 累加误差 (用于计算平均值)
-    double currentViewError = 0.0;      // [新增] 当前视角误差 (用于写入 CSV)
-    int lastSavedView = -1;             // [新增] 防止同一视角重复保存
+    double currentViewError = 0.0;      // 当前视角误差 (用于写入 CSV)
+    int lastSavedView = -1;             // 防止同一视角重复保存
 
-    // --- 文件输出相关 [新增] ---
+    // --- 文件输出相关 ---
     std::ofstream csvFile;              // CSV 文件流
     std::string currentOutputDir;       // 当前阶段的输出目录 (如 output/psnr)
 

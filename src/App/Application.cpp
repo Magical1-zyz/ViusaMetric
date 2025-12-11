@@ -9,6 +9,8 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
 
+namespace fs = std::filesystem;
+
 // =========================================================
 // 辅助函数
 // =========================================================
@@ -57,15 +59,16 @@ void Application::RenderTargets::Cleanup() {
 // 输出辅助函数实现
 // =========================================================
 void Application::EnsureDirectories() {
-    namespace fs = std::filesystem;
-    if (!fs::exists("output")) fs::create_directory("output");
-    if (!fs::exists("output/psnr")) fs::create_directory("output/psnr");
-    if (!fs::exists("output/normal")) fs::create_directory("output/normal");
-    if (!fs::exists("output/silhouette")) fs::create_directory("output/silhouette");
+    fs::path outRoot = config.paths.outputRoot;
+    if (!fs::exists(outRoot)) fs::create_directory(outRoot);
+    if (!fs::exists(outRoot / "psnr")) fs::create_directory(outRoot / "psnr");
+    if (!fs::exists(outRoot / "normal")) fs::create_directory(outRoot / "normal");
+    if (!fs::exists(outRoot / "silhouette")) fs::create_directory(outRoot / "silhouette");
 }
 
 void Application::InitPhaseOutput(const std::string& phaseName) {
-    currentOutputDir = "output/" + phaseName;
+    fs::path outDir = fs::path(config.paths.outputRoot) / phaseName;
+    currentOutputDir = outDir.string();
     lastSavedView = -1;
 
     if (csvFile.is_open()) csvFile.close();
@@ -78,19 +81,21 @@ void Application::InitPhaseOutput(const std::string& phaseName) {
 }
 
 void Application::SaveScreenshot(int viewIdx) {
-    std::vector<unsigned char> pixels(scrWidth * scrHeight * 3);
-    glReadPixels(0, 0, scrWidth, scrHeight, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+    int w = config.window.width;
+    int h = config.window.height;
+    std::vector<unsigned char> pixels(w * h * 3);
+    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
 
     // 垂直翻转
-    std::vector<unsigned char> flipped(scrWidth * scrHeight * 3);
-    for (int y = 0; y < scrHeight; ++y) {
-        unsigned char* srcRow = pixels.data() + y * scrWidth * 3;
-        unsigned char* dstRow = flipped.data() + (scrHeight - 1 - y) * scrWidth * 3;
-        std::memcpy(dstRow, srcRow, scrWidth * 3);
+    std::vector<unsigned char> flipped(w * h * 3);
+    for (int y = 0; y < h; ++y) {
+        unsigned char* srcRow = pixels.data() + y * w * 3;
+        unsigned char* dstRow = flipped.data() + (h - 1 - y) * w * 3;
+        std::memcpy(dstRow, srcRow, w * 3);
     }
 
     std::string filename = currentOutputDir + "/view_" + std::to_string(viewIdx) + ".png";
-    stbi_write_png(filename.c_str(), scrWidth, scrHeight, 3, flipped.data(), scrWidth * 3);
+    stbi_write_png(filename.c_str(), w, h, 3, flipped.data(), w * 3);
 }
 
 void Application::LogToCSV(int viewIdx, double error) {
@@ -107,8 +112,7 @@ void Application::UpdateHeatmapTexture(const std::vector<unsigned char>& data) {
 // =========================================================
 // Application 实现
 // =========================================================
-Application::Application(int width, int height, const char* title)
-        : scrWidth(width), scrHeight(height), appTitle(title) {}
+Application::Application(const AppConfig& cfg) : config(cfg) {}
 
 Application::~Application() {
     if (csvFile.is_open()) csvFile.close();
@@ -127,16 +131,19 @@ bool Application::Init() {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
-    window = glfwCreateWindow(scrWidth, scrHeight, appTitle, NULL, NULL);
+    window = glfwCreateWindow(config.window.width, config.window.height, config.window.title.c_str(), NULL, NULL);
     if (!window) return false;
     glfwMakeContextCurrent(window);
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) return false;
 
     // 资源加载
-    std::string hdrPath = Utils::FindFirstFileByExt("assets/hdrtextures", {".hdr"});
-    std::string refPath = Utils::FindFirstFileByExt("assets/refmodel", {".gltf", ".glb", ".obj"});
-    std::string optPath = Utils::FindFirstFileByExt("assets/optmodel", {".gltf", ".glb", ".obj"});
+    using namespace Utils;
+    fs::path assets = config.paths.assetsRoot;
+
+    std::string hdrPath = FindFirstFileByExt((assets / config.paths.hdrDir).string(), {".hdr"});
+    std::string refPath = FindFirstFileByExt((assets / config.paths.refDir).string(), {".gltf", ".glb", ".obj"});
+    std::string optPath = FindFirstFileByExt((assets / config.paths.optDir).string(), {".gltf", ".glb", ".obj"});
 
     if (refPath.empty()) {
         std::cerr << "[Error] Ref Model not found!" << std::endl;
@@ -153,12 +160,15 @@ bool Application::Init() {
         scene.envMaps = Renderer::IBLBaker::BakeIBL(hdrPath);
     }
 
-    targets.Init(1024, 1024);
+    targets.Init(config.render.width, config.render.height);
+
     renderer = std::make_unique<Renderer::PBRRenderer>(targets.width, targets.height);
-    visualizer = std::make_unique<Metrics::MetricVisualizer>(scrWidth, scrHeight);
+    renderer->SetExposure(config.render.exposure);
+
+    visualizer = std::make_unique<Metrics::MetricVisualizer>(config.window.width,config.window.height);
 
     float aspect = (float)targets.width / (float)targets.height;
-    views = Scene::CameraSampler::GenerateSamples(64, 2.0f, aspect, 0.0f);
+    views = Scene::CameraSampler::GenerateSamples(config.sampling.viewCount, config.sampling.radius, aspect, 0.0f);
     std::cout << "[System] Generated " << views.size() << " samples." << std::endl;
 
     InitPhaseOutput("psnr");
@@ -312,7 +322,7 @@ void Application::RenderPasses() {
 
     // --- Pass 3: Visualization ---
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, scrWidth, scrHeight);
+    glViewport(0, 0, config.window.width, config.window.height);
 
     glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

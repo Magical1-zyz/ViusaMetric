@@ -9,10 +9,10 @@ namespace Renderer {
         ~PBRRenderer();
 
         void BeginScene(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& camPos);
-        // [新增] renderMode 参数，默认 0
         void RenderScene(const Scene::Scene& scene, bool isRefModel, int renderMode = 0);
         void RenderSkybox(unsigned int envCubemap);
         void EndScene();
+        void SetExposure(float exp) {exposure = exp;}
 
         unsigned int GetFBO() const { return fbo; }
 
@@ -20,6 +20,7 @@ namespace Renderer {
         int width, height;
         unsigned int fbo;
         unsigned int colorTex, normalTex, depthTex;
+        float exposure = 1.0f;
 
         std::unique_ptr<Shader> pbrShader;
         std::unique_ptr<Shader> backgroundShader;

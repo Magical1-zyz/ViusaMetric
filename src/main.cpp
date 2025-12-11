@@ -1,22 +1,21 @@
-// src/main.cpp
 #include "App/Application.h"
+#include "App/Config.h"
 
-// 可以通过命令行参数传入配置，这里简化处理
-const int SCR_WIDTH = 1800;
-const int SCR_HEIGHT = 600;
 
 int main() {
-    // 实例化应用对象
-    // 可以在这里传入 Config 结构体，而不是散乱的参数
-    Application app(SCR_WIDTH, SCR_HEIGHT, "Ref(Lit) vs Opt(Unlit) vs Heatmap");
+    // 1. 初始化配置
+    AppConfig config;
 
-    // 初始化失败则退出
+    // 2. 实例化应用
+    Application app(config);
+
+    // 3. 初始化
     if (!app.Init()) {
         std::cerr << "[Fatal Error] Application initialization failed." << std::endl;
         return -1;
     }
 
-    // 进入主循环
+    // 4. 运行
     app.Run();
 
     return 0;

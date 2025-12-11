@@ -100,7 +100,7 @@ namespace Renderer {
 
             pbrShader->setInt("u_ShadingModel", isRefModel ? 0 : 1);
             pbrShader->setMat3("u_EnvRotation", glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f))));
-            pbrShader->setFloat("u_Exposure", 1.0f);
+            pbrShader->setFloat("u_Exposure", this->exposure);
             pbrShader->setVec3("u_AlbedoDefault", glm::vec3(1.0f));
             pbrShader->setFloat("u_RoughnessDefault", 0.5f);
             pbrShader->setFloat("u_MetallicDefault", 0.0f);
