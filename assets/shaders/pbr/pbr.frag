@@ -84,12 +84,12 @@ void main()
     vec3 finalColor = vec3(0.0);
     vec3 N_out = normalize(fs_in.Normal);
 
-    // --- Mode 1: Unlit (OptModel) ---
+    // --- Mode 1: Unlit ---
     if (u_ShadingModel == 1) {
         finalColor = albedo;
         N_out = normalize(fs_in.Normal);
     }
-    // --- Mode 0: Lit (RefModel) ---
+    // --- Mode 0: Lit ---
     else {
         float metallic, roughness;
         if (hasMRMap) {
@@ -121,7 +121,7 @@ void main()
         vec3 kD = 1.0 - kS;
         kD *= 1.0 - metallic;
 
-        // [Fix] Rotate Normal/Reflection vector to match UE HDR coordinates
+        // Rotate Normal/Reflection vector to match UE HDR coordinates
         vec3 rotN = u_EnvRotation * N;
         vec3 rotR = u_EnvRotation * R;
 

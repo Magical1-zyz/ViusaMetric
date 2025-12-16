@@ -8,6 +8,7 @@
 #include "Utils/FileSystemUtils.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#include "Metrics/ImageUtils.h"
 
 namespace fs = std::filesystem;
 
@@ -26,6 +27,27 @@ std::vector<unsigned char> ReadTextureByte(unsigned int texID, int w, int h) {
     glBindTexture(GL_TEXTURE_2D, texID);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGB, GL_UNSIGNED_BYTE, data.data());
     return data;
+}
+
+std::vector<float> ReadTextureDepth(unsigned int texID, int w, int h) {
+    std::vector<float> data(w * h); // 单通道
+    glBindTexture(GL_TEXTURE_2D, texID);
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, GL_FLOAT, data.data());
+    return data;
+}
+
+void UploadGrayscaleToTexture(unsigned int texID, const std::vector<unsigned char>& data, int w, int h) {
+    // 将单通道扩展为 RGBA (白色轮廓，黑色背景)
+    std::vector<unsigned char> rgba(w * h * 4);
+    for (int i = 0; i < w * h; ++i) {
+        unsigned char val = data[i];
+        rgba[i * 4 + 0] = val;
+        rgba[i * 4 + 1] = val;
+        rgba[i * 4 + 2] = val;
+        rgba[i * 4 + 3] = 255;
+    }
+    glBindTexture(GL_TEXTURE_2D, texID);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
 }
 
 // =========================================================
@@ -232,18 +254,17 @@ void Application::RenderPasses() {
     }
 
     const auto& cam = views[currentViewIdx];
-
     bool drawSkybox = false;
     int renderMode = 0;
 
     switch (phaseToDraw) {
         case RenderPhase::PHASE_IBL_PSNR:
-            drawSkybox = false;
+            drawSkybox = true;
             renderMode = 0;
             break;
         case RenderPhase::PHASE_SILHOUETTE:
             drawSkybox = false;
-            renderMode = 2;
+            renderMode = 1;
             break;
         case RenderPhase::PHASE_NORMAL:
             drawSkybox = false;
@@ -253,7 +274,7 @@ void Application::RenderPasses() {
 
     // --- Pass 1: RefModel ---
     renderer->BeginScene(cam.viewMatrix, cam.projMatrix, cam.position);
-    renderer->RenderScene(scene, true, renderMode);
+    renderer->RenderScene(scene, true, config.render.refPBR,renderMode);
     if (drawSkybox) renderer->RenderSkybox(scene.envMaps.envCubemap);
     renderer->EndScene();
 
@@ -261,15 +282,29 @@ void Application::RenderPasses() {
     glBindTexture(GL_TEXTURE_2D, targets.texRef);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, targets.width, targets.height);
 
+    // 如果是轮廓阶段，我们需要抓取法线和深度数据用于后续 CPU 计算
+    std::vector<float> refDepth, refNormals;
+    if (currentPhase == RenderPhase::PHASE_SILHOUETTE && currentPhase != RenderPhase::FINISHED) {
+        refDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
+        refNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
+    }
+
     // --- Pass 2: OptModel ---
     renderer->BeginScene(cam.viewMatrix, cam.projMatrix, cam.position);
-    renderer->RenderScene(scene, false, renderMode);
+    renderer->RenderScene(scene, false, config.render.optPBR,renderMode);
     if (drawSkybox) renderer->RenderSkybox(scene.envMaps.envCubemap);
     renderer->EndScene();
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER, renderer->GetFBO());
     glBindTexture(GL_TEXTURE_2D, targets.texOpt);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, targets.width, targets.height);
+
+    // 抓取 Opt 的法线和深度
+    std::vector<float> optDepth, optNormals;
+    if (currentPhase == RenderPhase::PHASE_SILHOUETTE && currentPhase != RenderPhase::FINISHED) {
+        optDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
+        optNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
+    }
 
     // =========================================================
     // 核心: CPU 计算误差 + 生成热力图
@@ -287,21 +322,47 @@ void Application::RenderPasses() {
             double mse = Metrics::Evaluator::ComputeNormalError(refFloats, optFloats, targets.width, targets.height);
             accumulatorError += mse;
             currentViewError = mse;
-        } else {
-            // 颜色/轮廓模式：Byte数据
+        }else if(currentPhase == RenderPhase::PHASE_SILHOUETTE){
+            // 1. 调用算法生成轮廓图 (0或255)
+            // 这里的 depthThresh 和 normalThresh 可以根据需要调整
+            std::vector<unsigned char> refSil = Metrics::ImageUtils::GenerateSilhouetteCPU(
+                    refDepth, refNormals, targets.width, targets.height, 0.01f, 0.1f
+            );
+            std::vector<unsigned char> optSil = Metrics::ImageUtils::GenerateSilhouetteCPU(
+                    optDepth, optNormals, targets.width, targets.height, 0.01f, 0.1f
+            );
+
+            // 2. 计算误差
+            double silErr = Metrics::Evaluator::ComputeSilhouetteError(refSil, optSil, targets.width, targets.height);
+            accumulatorError += silErr;
+            currentViewError = silErr;
+
+            // 3. 将生成的轮廓图上传回 texRef 和 texOpt，这样屏幕上看到的就是白色的轮廓线，而不是填充模型
+            UploadGrayscaleToTexture(targets.texRef, refSil, targets.width, targets.height);
+            UploadGrayscaleToTexture(targets.texOpt, optSil, targets.width, targets.height);
+
+            // 4. 为热力图准备数据 (GenerateHeatmap 需要 refBytes/optBytes)
+            // 因为轮廓图是 Byte 类型的，所以赋值给 refBytes
+            // 注意：GenerateHeatmap 内部对于 mode=2 会只取 R 通道，所以这里拷贝数据没问题
+            // 为了匹配 RGBA 格式，我们需要把单通道数据做一下格式转换给 Evaluator 吗？
+            // Evaluator::GenerateHeatmap 接收的是 RGB/RGBA bytes。
+            // 我们可以直接把 Upload 后的 texRef 读回来，或者手动构建 refBytes。
+            // 手动构建比较快：
+            refBytes.resize(targets.width * targets.height * 3);
+            optBytes.resize(targets.width * targets.height * 3);
+            for(size_t i=0; i<refSil.size(); ++i) {
+                refBytes[i*3+0] = refSil[i]; refBytes[i*3+1] = refSil[i]; refBytes[i*3+2] = refSil[i];
+                optBytes[i*3+0] = optSil[i]; optBytes[i*3+1] = optSil[i]; optBytes[i*3+2] = optSil[i];
+            }
+        }
+        else {
+            // psnr
             refBytes = ReadTextureByte(targets.texRef, targets.width, targets.height);
             optBytes = ReadTextureByte(targets.texOpt, targets.width, targets.height);
+            auto res = Metrics::Evaluator::ComputePSNR(refBytes, optBytes, targets.width, targets.height);
+            accumulatorError += res.second;
+            currentViewError = res.second;
 
-            if (currentPhase == RenderPhase::PHASE_IBL_PSNR) {
-                auto res = Metrics::Evaluator::ComputePSNR(refBytes, optBytes, targets.width, targets.height);
-                accumulatorError += res.second;
-                currentViewError = res.second;
-            } else {
-                // PHASE_SILHOUETTE
-                double silErr = Metrics::Evaluator::ComputeSilhouetteError(refBytes, optBytes, targets.width, targets.height);
-                accumulatorError += silErr;
-                currentViewError = silErr;
-            }
         }
 
         // 映射 App Phase -> Evaluator Mode

@@ -14,8 +14,9 @@ struct AppConfig {
     struct Render {
         int width = 1024;    // FBO 分辨率 (影响 Metrics 计算精度)
         int height = 1024;
-        float exposure = 1.0f; // PBR 曝光度
-        bool useIBL = true;
+        float exposure = 0.5f; // PBR 曝光度
+        bool refPBR = false;
+        bool optPBR = false;
     } render;
 
     // 采样配置
