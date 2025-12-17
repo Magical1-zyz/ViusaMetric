@@ -20,3 +20,5 @@ CMakeUserPresets.json
 .idea
 output
 assets/testmodel
+assets/optmodel
+assets/refmodel
