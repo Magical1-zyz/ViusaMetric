@@ -13,11 +13,14 @@ public:
     explicit Application(const AppConfig& config);
     ~Application();
 
+    // 禁止拷贝
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
 
-    bool Init();
-    void Run();
+    // 只初始化窗口和 OpenGL 上下文，不加载模型
+    bool InitSystem();
+    // 处理单个模型的全流程 (加载 -> 渲染循环 -> 保存 -> 卸载)
+    void ProcessSingleModel(const std::string & refPath, const std::string &optPath, const std::string& modelName);
 
 private:
     enum class RenderPhase {
@@ -27,8 +30,10 @@ private:
         FINISHED = 3
     };
 
-    // --- 保存全局配置 ---
+    // --- 配置与状态 ---
     AppConfig config;
+    std::string currentModelName;   // 当前处理的模型名
+    std::string currentOutputDir;   // 当前输出目录
 
     // --- 窗口与系统 ---
     GLFWwindow* window = nullptr;
@@ -59,18 +64,20 @@ private:
     double currentViewError = 0.0;      // 当前视角误差 (用于写入 CSV)
     int lastSavedView = -1;             // 防止同一视角重复保存
 
-    // --- 文件输出相关 ---
-    std::ofstream csvFile;              // CSV 文件流
-    std::string currentOutputDir;       // 当前阶段的输出目录 (如 output/psnr)
+    // --- 辅助函数 ---
+    void SetupOutputDirectories(const std::string& modelName);
+    void AppendToGlobalCSV(const std::string& metricType, int viewIdx, double error);
+    void SaveScreenshot(int viewIdx);
 
-    void EnsureDirectories();                                    // 创建文件夹
-    void InitPhaseOutput(const std::string& phaseName);          // 初始化阶段输出(打开CSV等)
-    void SaveScreenshot(int viewIdx);                            // 保存截图
-    void LogToCSV(int viewIdx, double error);                    // 写入数据
+    // --- 纹理读取 ---
+    std::vector<float> ReadTextureFloat(unsigned int texID, int w, int h);
+    std::vector<unsigned char> ReadTextureByte(unsigned int texID, int w, int h);
+    std::vector<float> ReadTextureDepth(unsigned int texID, int w, int h);
+    void UploadGrayscaleToTexture(unsigned int texID, const std::vector<unsigned char>& data, int w, int h);
     void UpdateHeatmapTexture(const std::vector<unsigned char>& data);
 
-    // --- 内部流程 ---
+    // --- 渲染流程 ---
     void ProcessInput();
-    void RenderPasses();
-    void UpdateState();
+    void UpdateState();  // 状态机流转 (PSNR->Sil->Normal->Finished)
+    void RenderPasses(); // 渲染、计算误差、更新热力图
 };

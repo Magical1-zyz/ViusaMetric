@@ -28,4 +28,19 @@ namespace Utils {
         }
         return "";
     }
+    inline std::filesystem::path FindFirstModelFile(const std::filesystem::path& dir) {
+        namespace fs = std::filesystem;
+        if (!fs::exists(dir) || !fs::is_directory(dir)) return {};
+
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (entry.is_regular_file()) {
+                std::string ext = entry.path().extension().string();
+                // 简单的大小写判断，如有需要可转小写
+                if (ext == ".gltf" || ext == ".glb") {
+                    return entry.path();
+                }
+            }
+        }
+        return {};
+    }
 }
