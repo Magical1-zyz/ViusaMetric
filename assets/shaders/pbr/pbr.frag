@@ -33,7 +33,6 @@ uniform vec3 camPos;
 
 // --- Fixes ---
 uniform float u_Exposure;
-uniform mat3  u_EnvRotation; // [NEW] Rotate IBL to match UE coordinates
 
 const float PI = 3.14159265359;
 
@@ -121,15 +120,11 @@ void main()
         vec3 kD = 1.0 - kS;
         kD *= 1.0 - metallic;
 
-        // Rotate Normal/Reflection vector to match UE HDR coordinates
-        vec3 rotN = u_EnvRotation * N;
-        vec3 rotR = u_EnvRotation * R;
-
-        vec3 irradiance = texture(irradianceMap, rotN).rgb;
+        vec3 irradiance = texture(irradianceMap, N).rgb;
         vec3 diffuse    = irradiance * albedo;
 
         const float MAX_REFLECTION_LOD = 4.0;
-        vec3 prefilteredColor = textureLod(prefilterMap, rotR,  roughness * MAX_REFLECTION_LOD).rgb;
+        vec3 prefilteredColor = textureLod(prefilterMap, R,  roughness * MAX_REFLECTION_LOD).rgb;
         vec2 brdf  = texture(brdfLUT, vec2(max(dot(N, V), 0.0), roughness)).rg;
         vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
