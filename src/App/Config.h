@@ -14,6 +14,8 @@ struct AppConfig {
     struct Render {
         int width = 1024;    // FBO 分辨率 (影响 Metrics 计算精度)
         int height = 1024;
+        bool display = true; // 展示窗口运行
+        float delayTime = 0.2f; // 每帧的延迟时间
         float exposure = 1.0f; // PBR 曝光度
         float roughnessDefault = 0.5f;
         float metallicDefault = 0.0f;
