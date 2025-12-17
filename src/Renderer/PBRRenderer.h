@@ -1,4 +1,5 @@
 #pragma once
+#include "App/Config.h"
 #include "Renderer/Shader.h"
 #include "Scene/Scene.h"
 
@@ -9,7 +10,7 @@ namespace Renderer {
         ~PBRRenderer();
 
         void BeginScene(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& camPos);
-        void RenderScene(const Scene::Scene& scene, bool isRefModel, bool lit, int renderMode = 0);
+        void RenderScene(const Scene::Scene& scene, bool isRefModel, const AppConfig& config, int renderMode = 0);
         void RenderSkybox(unsigned int envCubemap);
         void EndScene();
 

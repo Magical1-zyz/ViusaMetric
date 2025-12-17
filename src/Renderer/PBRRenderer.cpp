@@ -85,7 +85,7 @@ namespace Renderer {
         backgroundShader->setMat4("projection", projection);
     }
 
-    void PBRRenderer::RenderScene(const Scene::Scene& scene, bool isRefModel, bool lit, int renderMode) {
+    void PBRRenderer::RenderScene(const Scene::Scene& scene, bool isRefModel, const AppConfig& config, int renderMode) {
         Scene::Model* targetModel = isRefModel ? scene.refModel.get() : scene.optModel.get();
         if (!targetModel) return;
 
@@ -98,12 +98,12 @@ namespace Renderer {
             glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_CUBE_MAP, scene.envMaps.prefilterMap);
             glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, scene.envMaps.brdfLUT);
 
-            pbrShader->setInt("u_ShadingModel", lit ? 0 : 1);
-            pbrShader->setMat3("u_EnvRotation", glm::mat3(glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f))));
+            int lit = isRefModel ? config.render.refPBR : config.render.optPBR;
+            pbrShader->setInt("u_ShadingModel", lit);
             pbrShader->setFloat("u_Exposure", this->exposure);
             pbrShader->setVec3("u_AlbedoDefault", glm::vec3(1.0f));
-            pbrShader->setFloat("u_RoughnessDefault", 0.5f);
-            pbrShader->setFloat("u_MetallicDefault", 0.0f);
+            pbrShader->setFloat("u_RoughnessDefault", config.render.roughnessDefault);
+            pbrShader->setFloat("u_MetallicDefault", config.render.metallicDefault);
 
             pbrShader->setMat4("model", modelMatrix);
             targetModel->Draw(pbrShader->ID);

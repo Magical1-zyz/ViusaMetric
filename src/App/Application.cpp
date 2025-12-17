@@ -274,7 +274,7 @@ void Application::RenderPasses() {
 
     // --- Pass 1: RefModel ---
     renderer->BeginScene(cam.viewMatrix, cam.projMatrix, cam.position);
-    renderer->RenderScene(scene, true, config.render.refPBR,renderMode);
+    renderer->RenderScene(scene, true, config,renderMode);
     if (drawSkybox) renderer->RenderSkybox(scene.envMaps.envCubemap);
     renderer->EndScene();
 
@@ -291,7 +291,7 @@ void Application::RenderPasses() {
 
     // --- Pass 2: OptModel ---
     renderer->BeginScene(cam.viewMatrix, cam.projMatrix, cam.position);
-    renderer->RenderScene(scene, false, config.render.optPBR,renderMode);
+    renderer->RenderScene(scene, false, config,renderMode);
     if (drawSkybox) renderer->RenderSkybox(scene.envMaps.envCubemap);
     renderer->EndScene();
 

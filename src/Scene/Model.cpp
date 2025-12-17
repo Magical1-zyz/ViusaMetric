@@ -8,7 +8,6 @@
 namespace Scene {
 
     Model::Model(std::string const &path) {
-        // [调试] 暂时禁用翻转，排除 UV 倒置导致采样到黑色背景的可能性
         stbi_set_flip_vertically_on_load(false);
         loadModel(path);
         computeBoundingBox();
