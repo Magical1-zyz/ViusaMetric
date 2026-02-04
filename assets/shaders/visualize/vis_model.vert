@@ -1,18 +1,25 @@
 #version 330 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
+layout (location = 2) in vec2 aTexCoords;
 
-out vec3 Normal;
+out VS_OUT {
+    vec3 WorldPos;
+    vec3 Normal;
+    vec2 TexCoords;
+} vs_out;
 
-uniform mat4 model;
-uniform mat4 view;
 uniform mat4 projection;
+uniform mat4 view;
+uniform mat4 model;
 
-void main() {
-    // 将法线变换到世界空间
-    // 如果只有统一缩放，直接用 mat3(model) 即可；若有非统一缩放，需用 transpose(inverse(mat3(model)))
-    // 这里为了通用性，我们假设 C++ 端或者驱动会处理好，或者简化为 mat3(model)
-    Normal = mat3(model) * aNormal;
+void main()
+{
+    vs_out.TexCoords = aTexCoords;
+    vs_out.WorldPos = vec3(model * vec4(aPos, 1.0));
 
-    gl_Position = projection * view * model * vec4(aPos, 1.0);
+    // 计算法线矩阵：处理非均匀缩放，保证法线方向正确
+    vs_out.Normal = mat3(transpose(inverse(model))) * aNormal;
+
+    gl_Position = projection * view * vec4(vs_out.WorldPos, 1.0);
 }

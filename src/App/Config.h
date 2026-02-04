@@ -19,8 +19,9 @@ struct AppConfig {
         float exposure = 1.0f; // PBR 曝光度
         float roughnessDefault = 0.5f;
         float metallicDefault = 0.0f;
-        bool refPBR = false;
+        bool refPBR = true;
         bool optPBR = true;
+        glm::vec3 background = glm::vec3(1.0f, 1.0f, 1.0f);
     } render;
 
     // 采样配置

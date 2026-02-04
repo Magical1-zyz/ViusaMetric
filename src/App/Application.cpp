@@ -139,6 +139,7 @@ bool Application::InitSystem() {
     visualizer = std::make_unique<Metrics::MetricVisualizer>(config.window.width, config.window.height);
     renderer = std::make_unique<Renderer::PBRRenderer>(targets.width, targets.height);
     renderer->SetExposure(config.render.exposure);
+    renderer->SetBackground(config.render.background);
 
     return true;
 }
@@ -316,8 +317,13 @@ void Application::RenderPasses() {
 
     // 如果是轮廓阶段，我们需要抓取法线和深度数据用于后续 CPU 计算
     std::vector<float> refDepth, refNormals;
-    if (currentPhase == RenderPhase::PHASE_SILHOUETTE) {
-        refDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
+    if (currentPhase == RenderPhase::PHASE_SILHOUETTE || currentPhase == RenderPhase::PHASE_NORMAL) {
+        // 在白模模式下，法线存储在 attachment 1 (GetNormalTex)，而不是 Color Buffer
+        // 深度存储在 Depth attachment
+        if (currentPhase == RenderPhase::PHASE_SILHOUETTE) {
+            refDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
+        }
+        // 无论是法线还是轮廓阶段，我们都需要准确的几何法线
         refNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
     }
 
@@ -333,8 +339,10 @@ void Application::RenderPasses() {
 
     // 抓取 Opt 的法线和深度
     std::vector<float> optDepth, optNormals;
-    if (currentPhase == RenderPhase::PHASE_SILHOUETTE && currentPhase != RenderPhase::FINISHED) {
-        optDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
+    if (currentPhase == RenderPhase::PHASE_SILHOUETTE || currentPhase == RenderPhase::PHASE_NORMAL) {
+        if (currentPhase == RenderPhase::PHASE_SILHOUETTE) {
+            optDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
+        }
         optNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
     }
 
@@ -348,12 +356,14 @@ void Application::RenderPasses() {
 
         if (currentPhase == RenderPhase::PHASE_NORMAL) {
             // 法线模式：Float数据
-            refFloats = ReadTextureFloat(targets.texRef, targets.width, targets.height);
-            optFloats = ReadTextureFloat(targets.texOpt, targets.width, targets.height);
-            currentViewError = Metrics::Evaluator::ComputeNormalError(refFloats, optFloats, targets.width, targets.height);
+            refFloats = refNormals;
+            optFloats = optNormals;
+
+            // 为了让 GenerateHeatmap 知道背景在哪里，我们读取 targets.texRef (纯白物体/黑色背景)
+            refBytes = ReadTextureByte(targets.texRef, targets.width, targets.height);
+            optBytes = ReadTextureByte(targets.texOpt, targets.width, targets.height);
         }else if(currentPhase == RenderPhase::PHASE_SILHOUETTE){
-            // 1. 调用算法生成轮廓图 (0或255)
-            // 这里的 depthThresh 和 normalThresh 可以根据需要调整
+            // 使用白模几何数据生成轮廓
             std::vector<unsigned char> refSil = Metrics::ImageUtils::GenerateSilhouetteCPU(
                     refDepth, refNormals, targets.width, targets.height, 0.01f, 0.1f
             );
@@ -361,20 +371,13 @@ void Application::RenderPasses() {
                     optDepth, optNormals, targets.width, targets.height, 0.01f, 0.1f
             );
 
-            // 2. 计算误差
             currentViewError = Metrics::Evaluator::ComputeSilhouetteError(refSil, optSil, targets.width, targets.height);
 
-            // 3. 将生成的轮廓图上传回 texRef 和 texOpt，这样屏幕上看到的就是白色的轮廓线，而不是填充模型
+            // 可视化：将轮廓写回纹理供显示
             UploadGrayscaleToTexture(targets.texRef, refSil, targets.width, targets.height);
             UploadGrayscaleToTexture(targets.texOpt, optSil, targets.width, targets.height);
 
-            // 4. 为热力图准备数据 (GenerateHeatmap 需要 refBytes/optBytes)
-            // 因为轮廓图是 Byte 类型的，所以赋值给 refBytes
-            // 注意：GenerateHeatmap 内部对于 mode=2 会只取 R 通道，所以这里拷贝数据没问题
-            // 为了匹配 RGBA 格式，我们需要把单通道数据做一下格式转换给 Evaluator 吗？
-            // Evaluator::GenerateHeatmap 接收的是 RGB/RGBA bytes。
-            // 我们可以直接把 Upload 后的 texRef 读回来，或者手动构建 refBytes。
-            // 手动构建比较快：
+            // 构造 Heatmap 所需数据
             refBytes.resize(targets.width * targets.height * 3);
             optBytes.resize(targets.width * targets.height * 3);
             for(size_t i=0; i<refSil.size(); ++i) {

@@ -15,6 +15,7 @@ namespace Renderer {
         void EndScene();
 
         void SetExposure(float exp) {exposure = exp;}
+        void SetBackground(glm::vec3 back){background = back;}
 
         unsigned int GetFBO() const { return fbo; }
         unsigned int GetColorTex() const {return colorTex;}
@@ -25,7 +26,8 @@ namespace Renderer {
         int width, height;
         unsigned int fbo;
         unsigned int colorTex, normalTex, depthTex;
-        float exposure = 1.0f;
+        float exposure;
+        glm::vec3 background;
 
         std::unique_ptr<Shader> pbrShader;
         std::unique_ptr<Shader> backgroundShader;
