@@ -12,9 +12,6 @@
 
 namespace fs = std::filesystem;
 
-// =========================================================
-// 辅助函数
-// =========================================================
 void Application::SetupOutputDirectories(const std::string& modelName) {
     fs::path root = config.paths.outputRoot;
     fs::path base = root / modelName;
@@ -26,19 +23,14 @@ void Application::SetupOutputDirectories(const std::string& modelName) {
 
 void Application::AppendToGlobalCSV(const std::string& metricType, int viewIdx, double error) {
     std::string filename;
-
-    // 根据类型决定文件名
     if (metricType == "PSNR") filename = "metrics_psnr.csv";
     else if (metricType == "Normal") filename = "metrics_normal.csv";
     else if (metricType == "Silhouette") filename = "metrics_silhouette.csv";
-    else return; // 未知类型不写入
+    else return;
 
     fs::path csvPath = fs::path(config.paths.outputRoot) / filename;
-
-    // 追加模式打开
     std::ofstream csv(csvPath, std::ios::app);
     if (csv.is_open()) {
-        // 格式: ModelName, ViewIndex, ErrorValue
         csv << currentModelName << "," << viewIdx << "," << error << "\n";
     }
 }
@@ -49,7 +41,6 @@ void Application::SaveScreenshot(int viewIdx) {
     std::vector<unsigned char> pixels(w * h * 3);
     glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
 
-    // 垂直翻转
     std::vector<unsigned char> flipped(w * h * 3);
     for (int y = 0; y < h; ++y) {
         unsigned char* srcRow = pixels.data() + y * w * 3;
@@ -61,9 +52,6 @@ void Application::SaveScreenshot(int viewIdx) {
     stbi_write_png(filename.c_str(), w, h, 3, flipped.data(), w * 3);
 }
 
-// =========================================================
-// Helpers (Textures Read)
-// =========================================================
 std::vector<float> Application::ReadTextureFloat(unsigned int texID, int w, int h) {
     std::vector<float> data(w * h * 3);
     glBindTexture(GL_TEXTURE_2D, texID);
@@ -79,14 +67,13 @@ std::vector<unsigned char> Application::ReadTextureByte(unsigned int texID, int 
 }
 
 std::vector<float> Application::ReadTextureDepth(unsigned int texID, int w, int h) {
-    std::vector<float> data(w * h); // 单通道
+    std::vector<float> data(w * h);
     glBindTexture(GL_TEXTURE_2D, texID);
     glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, GL_FLOAT, data.data());
     return data;
 }
 
 void Application::UploadGrayscaleToTexture(unsigned int texID, const std::vector<unsigned char>& data, int w, int h) {
-    // 将单通道扩展为 RGBA (白色轮廓，黑色背景)
     std::vector<unsigned char> rgba(w * h * 4);
     for (int i = 0; i < w * h; ++i) {
         unsigned char val = data[i];
@@ -104,9 +91,6 @@ void Application::UpdateHeatmapTexture(const std::vector<unsigned char>& data) {
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, targets.width, targets.height, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
 }
 
-// =========================================================
-// Application 实现
-// =========================================================
 Application::Application(const AppConfig& cfg) : config(cfg) {}
 
 Application::~Application() {
@@ -134,7 +118,6 @@ bool Application::InitSystem() {
 
     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) return false;
 
-    // 初始化可视化器和渲染器资源 (RenderTargets)
     targets.Init(config.render.width, config.render.height);
     visualizer = std::make_unique<Metrics::MetricVisualizer>(config.window.width, config.window.height);
     renderer = std::make_unique<Renderer::PBRRenderer>(targets.width, targets.height);
@@ -146,20 +129,13 @@ bool Application::InitSystem() {
 
 void Application::ProcessSingleModel(const std::string& refPath, const std::string& optPath, const std::string& modelName) {
     currentModelName = modelName;
-
-    // --- A. 准备阶段 ---
-    // 1. 创建该模型的输出目录 output/modelName/
     SetupOutputDirectories(modelName);
 
-    // 2. 加载模型
-    // 注意：这里需要先清理上一个场景
     scene.Cleanup();
-
     std::cout << "  [System] Loading..." << std::endl;
     scene.refModel = Resources::ResourceManager::GetInstance().LoadModel(refPath);
     scene.optModel = Resources::ResourceManager::GetInstance().LoadModel(optPath);
 
-    // 3. 处理 HDR (如果有全局 HDR 配置，最好只加载一次，这里为了简单假设每次检查)
     fs::path assets = config.paths.assetsRoot;
     std::string hdrPath = Utils::FindFirstFileByExt((assets / config.paths.hdrDir).string(), {".hdr"});
     if (!hdrPath.empty()) {
@@ -169,40 +145,29 @@ void Application::ProcessSingleModel(const std::string& refPath, const std::stri
         }
     }
 
-    // 4. 重置状态
     float aspect = (float)targets.width / (float)targets.height;
     views = Scene::CameraSampler::GenerateSamples(config.sampling.viewCount, config.sampling.radius, aspect, 0.0f);
 
     currentViewIdx = 0;
-    lastTime = (float)glfwGetTime(); // 重置时间基准
+    lastTime = (float)glfwGetTime();
     accumulatorError = 0.0;
-    currentPhase = RenderPhase::PHASE_IBL_PSNR; // 从第一个阶段开始
+    currentPhase = RenderPhase::PHASE_IBL_PSNR;
     lastSavedView = -1;
 
-    // 设置初始输出目录 (psnr)
     fs::path outRoot = config.paths.outputRoot;
     currentOutputDir = (outRoot / modelName / "psnr").string();
 
-    // --- B. 渲染循环 ---
-    // 这个循环只针对当前模型运行，直到所有阶段完成
     while (!glfwWindowShouldClose(window) && currentPhase != RenderPhase::FINISHED) {
-        ProcessInput(); // 保持窗口响应
-        UpdateState();  // 状态机流转
-        RenderPasses(); // 渲染与计算
+        ProcessInput();
+        UpdateState();
+        RenderPasses();
 
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
-
-    // --- C. 清理 ---
-    // 循环结束意味着该模型处理完毕
     std::cout << "[System] Finished " << modelName << std::endl;
-    // 显存清理交给下一次循环开头的 scene.Cleanup() 或析构函数
 }
 
-// =========================================================
-// RenderTargets 实现
-// =========================================================
 void Application::RenderTargets::Init(int w, int h) {
     width = w;
     height = h;
@@ -218,7 +183,7 @@ void Application::RenderTargets::Init(int w, int h) {
     };
     createTex(texRef, true);
     createTex(texOpt, true);
-    createTex(texHeatmap, false); // 热力图用普通 RGBA8
+    createTex(texHeatmap, false);
 }
 
 void Application::RenderTargets::Cleanup() {
@@ -227,9 +192,6 @@ void Application::RenderTargets::Cleanup() {
     if (texHeatmap) glDeleteTextures(1, &texHeatmap);
 }
 
-// =========================================================
-// Rendering process
-// =========================================================
 void Application::ProcessInput() {
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
@@ -246,7 +208,6 @@ void Application::UpdateState() {
         if (currentViewIdx >= views.size()) {
             currentViewIdx = 0;
 
-            // 计算平均值
             double avgError = accumulatorError / (double)views.size();
             std::string metricName;
 
@@ -260,7 +221,6 @@ void Application::UpdateState() {
 
             accumulatorError = 0.0;
 
-            // 切换阶段
             fs::path outRoot = config.paths.outputRoot;
             if (currentPhase == RenderPhase::PHASE_IBL_PSNR) {
                 currentPhase = RenderPhase::PHASE_SILHOUETTE;
@@ -307,37 +267,55 @@ void Application::RenderPasses() {
 
     // --- Pass 1: RefModel ---
     renderer->BeginScene(cam.viewMatrix, cam.projMatrix, cam.position);
-    renderer->RenderScene(scene, true, config,renderMode);
+    renderer->RenderScene(scene, true, config, renderMode);
     if (drawSkybox) renderer->RenderSkybox(scene.envMaps.envCubemap);
     renderer->EndScene();
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER, renderer->GetFBO());
+
+    // [修改点2]：在 Normal 模式下，需要读取 Attachment 1 (法线)，否则会读到黑色的 Color Attachment
+    if (currentPhase == RenderPhase::PHASE_NORMAL) {
+        glReadBuffer(GL_COLOR_ATTACHMENT1);
+    } else {
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+    }
+
     glBindTexture(GL_TEXTURE_2D, targets.texRef);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, targets.width, targets.height);
 
-    // 如果是轮廓阶段，我们需要抓取法线和深度数据用于后续 CPU 计算
+    // 恢复读取缓冲区，以免影响后续操作
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+
+    // 数据抓取 (CPU计算用)
     std::vector<float> refDepth, refNormals;
     if (currentPhase == RenderPhase::PHASE_SILHOUETTE || currentPhase == RenderPhase::PHASE_NORMAL) {
-        // 在白模模式下，法线存储在 attachment 1 (GetNormalTex)，而不是 Color Buffer
-        // 深度存储在 Depth attachment
         if (currentPhase == RenderPhase::PHASE_SILHOUETTE) {
             refDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
         }
-        // 无论是法线还是轮廓阶段，我们都需要准确的几何法线
         refNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
     }
 
     // --- Pass 2: OptModel ---
     renderer->BeginScene(cam.viewMatrix, cam.projMatrix, cam.position);
-    renderer->RenderScene(scene, false, config,renderMode);
+    renderer->RenderScene(scene, false, config, renderMode);
     if (drawSkybox) renderer->RenderSkybox(scene.envMaps.envCubemap);
     renderer->EndScene();
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER, renderer->GetFBO());
+
+    // [修改点2]：同上，Opt Model 也要切换读取源
+    if (currentPhase == RenderPhase::PHASE_NORMAL) {
+        glReadBuffer(GL_COLOR_ATTACHMENT1);
+    } else {
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+    }
+
     glBindTexture(GL_TEXTURE_2D, targets.texOpt);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, targets.width, targets.height);
 
-    // 抓取 Opt 的法线和深度
+    // 恢复
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+
     std::vector<float> optDepth, optNormals;
     if (currentPhase == RenderPhase::PHASE_SILHOUETTE || currentPhase == RenderPhase::PHASE_NORMAL) {
         if (currentPhase == RenderPhase::PHASE_SILHOUETTE) {
@@ -349,68 +327,64 @@ void Application::RenderPasses() {
     // =========================================================
     // 核心: CPU 计算误差 + 生成热力图
     // =========================================================
+    std::vector<unsigned char> refBytes, optBytes;
+    std::vector<float> refFloats, optFloats;
 
+    if (currentPhase == RenderPhase::PHASE_NORMAL) {
+        // Normal Mode: Float Data for Calculation, Byte Data for background checking (Ref=Black?)
+        refFloats = refNormals;
+        optFloats = optNormals;
 
-        std::vector<unsigned char> refBytes, optBytes;
-        std::vector<float> refFloats, optFloats;
-
-        if (currentPhase == RenderPhase::PHASE_NORMAL) {
-            // 法线模式：Float数据
-            refFloats = refNormals;
-            optFloats = optNormals;
-
-            // 为了让 GenerateHeatmap 知道背景在哪里，我们读取 targets.texRef (纯白物体/黑色背景)
-            refBytes = ReadTextureByte(targets.texRef, targets.width, targets.height);
-            optBytes = ReadTextureByte(targets.texOpt, targets.width, targets.height);
-        }else if(currentPhase == RenderPhase::PHASE_SILHOUETTE){
-            // 使用白模几何数据生成轮廓
-            std::vector<unsigned char> refSil = Metrics::ImageUtils::GenerateSilhouetteCPU(
-                    refDepth, refNormals, targets.width, targets.height, 0.01f, 0.1f
-            );
-            std::vector<unsigned char> optSil = Metrics::ImageUtils::GenerateSilhouetteCPU(
-                    optDepth, optNormals, targets.width, targets.height, 0.01f, 0.1f
-            );
-
-            currentViewError = Metrics::Evaluator::ComputeSilhouetteError(refSil, optSil, targets.width, targets.height);
-
-            // 可视化：将轮廓写回纹理供显示
-            UploadGrayscaleToTexture(targets.texRef, refSil, targets.width, targets.height);
-            UploadGrayscaleToTexture(targets.texOpt, optSil, targets.width, targets.height);
-
-            // 构造 Heatmap 所需数据
-            refBytes.resize(targets.width * targets.height * 3);
-            optBytes.resize(targets.width * targets.height * 3);
-            for(size_t i=0; i<refSil.size(); ++i) {
-                refBytes[i*3+0] = refSil[i]; refBytes[i*3+1] = refSil[i]; refBytes[i*3+2] = refSil[i];
-                optBytes[i*3+0] = optSil[i]; optBytes[i*3+1] = optSil[i]; optBytes[i*3+2] = optSil[i];
-            }
-        }
-        else {
-            // psnr
-            refBytes = ReadTextureByte(targets.texRef, targets.width, targets.height);
-            optBytes = ReadTextureByte(targets.texOpt, targets.width, targets.height);
-            auto res = Metrics::Evaluator::ComputePSNR(refBytes, optBytes, targets.width, targets.height);
-            currentViewError = res.second;
-
-        }
-
-        accumulatorError += currentViewError;
-
-        // 映射 App Phase -> Evaluator Mode
-        int modeIdx = 0;
-        if (currentPhase == RenderPhase::PHASE_IBL_PSNR) modeIdx = 0;
-        else if (currentPhase == RenderPhase::PHASE_NORMAL) modeIdx = 1; // Evaluator::Normal Expects Float
-        else if (currentPhase == RenderPhase::PHASE_SILHOUETTE) modeIdx = 2;
-
-        std::vector<unsigned char> heatmapData = Metrics::Evaluator::GenerateHeatmap(
-                refBytes, refFloats,
-                optBytes, optFloats,
-                targets.width, targets.height,
-                modeIdx
+        // 重新读取 Color Attachment 0 (此时应该是黑色背景 + 白色/黑色模型?)
+        // 为了 GenerateHeatmap 能正确判断背景，我们需要 TexRef 和 TexOpt 的“可视”数据
+        // 之前我们将 Normal 数据 copy 到了 texRef/texOpt，所以现在 ReadTextureByte 读到的也是法线颜色
+        // 这是正确的，因为法线 (0,0,0) 是非法的，可以用来判断背景（如果 Shader 清屏是 0）
+        refBytes = ReadTextureByte(targets.texRef, targets.width, targets.height);
+        optBytes = ReadTextureByte(targets.texOpt, targets.width, targets.height);
+    }
+    else if(currentPhase == RenderPhase::PHASE_SILHOUETTE){
+        std::vector<unsigned char> refSil = Metrics::ImageUtils::GenerateSilhouetteCPU(
+                refDepth, refNormals, targets.width, targets.height, 0.01f, 0.1f
+        );
+        std::vector<unsigned char> optSil = Metrics::ImageUtils::GenerateSilhouetteCPU(
+                optDepth, optNormals, targets.width, targets.height, 0.01f, 0.1f
         );
 
-        UpdateHeatmapTexture(heatmapData);
+        currentViewError = Metrics::Evaluator::ComputeSilhouetteError(refSil, optSil, targets.width, targets.height);
 
+        UploadGrayscaleToTexture(targets.texRef, refSil, targets.width, targets.height);
+        UploadGrayscaleToTexture(targets.texOpt, optSil, targets.width, targets.height);
+
+        refBytes.resize(targets.width * targets.height * 3);
+        optBytes.resize(targets.width * targets.height * 3);
+        for(size_t i=0; i<refSil.size(); ++i) {
+            refBytes[i*3+0] = refSil[i]; refBytes[i*3+1] = refSil[i]; refBytes[i*3+2] = refSil[i];
+            optBytes[i*3+0] = optSil[i]; optBytes[i*3+1] = optSil[i]; optBytes[i*3+2] = optSil[i];
+        }
+    }
+    else {
+        // PSNR
+        refBytes = ReadTextureByte(targets.texRef, targets.width, targets.height);
+        optBytes = ReadTextureByte(targets.texOpt, targets.width, targets.height);
+        auto res = Metrics::Evaluator::ComputePSNR(refBytes, optBytes, targets.width, targets.height);
+        currentViewError = res.second;
+    }
+
+    accumulatorError += currentViewError;
+
+    int modeIdx = 0;
+    if (currentPhase == RenderPhase::PHASE_IBL_PSNR) modeIdx = 0;
+    else if (currentPhase == RenderPhase::PHASE_NORMAL) modeIdx = 1;
+    else if (currentPhase == RenderPhase::PHASE_SILHOUETTE) modeIdx = 2;
+
+    std::vector<unsigned char> heatmapData = Metrics::Evaluator::GenerateHeatmap(
+            refBytes, refFloats,
+            optBytes, optFloats,
+            targets.width, targets.height,
+            modeIdx
+    );
+
+    UpdateHeatmapTexture(heatmapData);
 
     // --- Pass 3: Visualization ---
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -419,7 +393,6 @@ void Application::RenderPasses() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     visualizer->RenderComparison(targets.texRef, targets.texOpt, targets.texHeatmap);
 
-    // 保存结果
     if (currentViewIdx != lastSavedView) {
         SaveScreenshot(currentViewIdx);
         std::string mName = (currentPhase == RenderPhase::PHASE_IBL_PSNR) ? "PSNR" :
