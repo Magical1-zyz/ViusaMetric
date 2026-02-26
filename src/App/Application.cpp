@@ -335,8 +335,6 @@ void Application::RenderPasses() {
         refFloats = refNormals;
         optFloats = optNormals;
 
-        // 重新读取 Color Attachment 0 (此时应该是黑色背景 + 白色/黑色模型?)
-        // 为了 GenerateHeatmap 能正确判断背景，我们需要 TexRef 和 TexOpt 的“可视”数据
         // 之前我们将 Normal 数据 copy 到了 texRef/texOpt，所以现在 ReadTextureByte 读到的也是法线颜色
         // 这是正确的，因为法线 (0,0,0) 是非法的，可以用来判断背景（如果 Shader 清屏是 0）
         refBytes = ReadTextureByte(targets.texRef, targets.width, targets.height);
