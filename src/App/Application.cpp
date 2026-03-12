@@ -1,6 +1,5 @@
 #include "Application.h"
 #include "Metrics/Evaluator.h"
-#include "Metrics/ImageUtils.h"
 #include "Metrics/MetricVisualizer.h"
 #include "Renderer/IBLBaker.h"
 #include "Renderer/PBRRenderer.h"
