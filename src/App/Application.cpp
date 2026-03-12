@@ -184,15 +184,10 @@ void Application::SaveScreenshot(int viewIdx) {
     std::vector<unsigned char> pixels(w * h * 3);
     glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
 
-    std::vector<unsigned char> flipped(w * h * 3);
-    for (int y = 0; y < h; ++y) {
-        unsigned char* srcRow = pixels.data() + y * w * 3;
-        unsigned char* dstRow = flipped.data() + (h - 1 - y) * w * 3;
-        std::memcpy(dstRow, srcRow, w * 3);
-    }
-
+    // 开启 stbi 的垂直翻转，直接存 pixels 即可
+    stbi_flip_vertically_on_write(true);
     std::string filename = currentOutputDir + "/view_" + std::to_string(viewIdx) + ".png";
-    stbi_write_png(filename.c_str(), w, h, 3, flipped.data(), w * 3);
+    stbi_write_png(filename.c_str(), w, h, 3, pixels.data(), w * 3);
 }
 
 std::vector<float> Application::ReadTextureFloat(unsigned int texID, int w, int h) {
@@ -566,7 +561,6 @@ void Application::RenderPasses() {
     }
     else {
         // PSNR
-        // PSNR
         refBytes = ReadTextureByte(targets.texRef, targets.width, targets.height);
         optBytes = ReadTextureByte(targets.texOpt, targets.width, targets.height);
 
@@ -611,7 +605,6 @@ void Application::RenderPasses() {
 
         glBindTexture(GL_TEXTURE_2D, targets.texOpt);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, targets.width, targets.height, GL_RGBA, GL_UNSIGNED_BYTE, optUpload.data());
-        currentViewError = res.second;
     }
 
     int modeIdx = 0;
