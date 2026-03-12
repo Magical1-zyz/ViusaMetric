@@ -4,7 +4,6 @@
 namespace Renderer {
 
     PBRRenderer::PBRRenderer(int w, int h) : width(w), height(h) {
-        // 1. PBR Shader
         pbrShader = std::make_unique<Shader>("assets/shaders/pbr/pbr.vert", "assets/shaders/pbr/pbr.frag");
         pbrShader->use();
         pbrShader->setInt("irradianceMap", 0);
@@ -14,12 +13,10 @@ namespace Renderer {
         pbrShader->setInt("normalMap", 4);
         pbrShader->setInt("metallicRoughnessMap", 5);
 
-        // 2. Background Shader
         backgroundShader = std::make_unique<Shader>("assets/shaders/pbr/background.vert", "assets/shaders/pbr/background.frag");
         backgroundShader->use();
         backgroundShader->setInt("environmentMap", 0);
 
-        // 3. White Model Shader (用于法线和轮廓)
         visShader = std::make_unique<Shader>("assets/shaders/visualize/vis_model.vert", "assets/shaders/visualize/vis_model.frag");
 
         SetupFBO();
@@ -36,7 +33,7 @@ namespace Renderer {
         glGenFramebuffers(1, &fbo);
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
-        // Color Attachment 0: RGBA16F (PBR颜色 或 白模颜色)
+        // Color Attachment 0: RGBA16F
         glGenTextures(1, &colorTex);
         glBindTexture(GL_TEXTURE_2D, colorTex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
@@ -44,15 +41,14 @@ namespace Renderer {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTex, 0);
 
-        // Color Attachment 1: RGB16F (PBR法线 或 几何法线)
+        // Color Attachment 1: RGB16F
         glGenTextures(1, &normalTex);
         glBindTexture(GL_TEXTURE_2D, normalTex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB16F, width, height, 0, GL_RGB, GL_FLOAT, NULL);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); // 线性插值对法线可能更好
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, normalTex, 0);
 
-        // Depth Attachment
         glGenTextures(1, &depthTex);
         glBindTexture(GL_TEXTURE_2D, depthTex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
@@ -66,18 +62,21 @@ namespace Renderer {
     void PBRRenderer::BeginScene(const glm::mat4& view, const glm::mat4& projection, const glm::vec3& camPos) {
         glBindFramebuffer(GL_FRAMEBUFFER, fbo);
         glViewport(0, 0, width, height);
-        // 使用纯黑清屏，Alpha=1
-        glClearColor(this->background.r, this->background.g, this->background.b, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // 【修改点】分离清除缓冲的操作。确保法线贴图缓冲区的背景被绝对置零 (0, 0, 0)，为 Evaluator 计算误差剔除背景做准备
+        float bgColor[] = { this->background.r, this->background.g, this->background.b, 1.0f };
+        float black[] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        glClearBufferfv(GL_COLOR, 0, bgColor); // GL_COLOR_ATTACHMENT0 (画面背景)
+        glClearBufferfv(GL_COLOR, 1, black);   // GL_COLOR_ATTACHMENT1 (法线背景强制纯黑)
+        glClear(GL_DEPTH_BUFFER_BIT);
+
         glEnable(GL_DEPTH_TEST);
 
-        // 更新 PBR Shader 矩阵
         pbrShader->use();
         pbrShader->setMat4("view", view);
         pbrShader->setMat4("projection", projection);
         pbrShader->setVec3("camPos", camPos);
 
-        // 必须同时更新 Vis Shader 矩阵，否则切换模式后模型会因为 MVP 矩阵缺失而不可见
         if (visShader) {
             visShader->use();
             visShader->setMat4("view", view);
@@ -95,7 +94,6 @@ namespace Renderer {
 
         glm::mat4 modelMatrix = targetModel->GetNormalizationMatrix();
 
-        // 模式 0: 标准 PBR
         if (renderMode == 0) {
             pbrShader->use();
             glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_CUBE_MAP, scene.envMaps.irradianceMap);
@@ -108,19 +106,13 @@ namespace Renderer {
             pbrShader->setVec3("u_AlbedoDefault", glm::vec3(1.0f));
             pbrShader->setFloat("u_RoughnessDefault", config.render.roughnessDefault);
             pbrShader->setFloat("u_MetallicDefault", config.render.metallicDefault);
-
             pbrShader->setMat4("model", modelMatrix);
-            // PBR 模式下，Ref 模型可能需要法线贴图，Opt 不需要 (根据你的需求调整)
-            // 这里为了安全，如果是 Opt 模型且是单一贴图拟合，强制关掉法线贴图
-            if (!isRefModel) {
-                pbrShader->setInt("hasNormalMap", 0);
-            }
+
             targetModel->Draw(pbrShader->ID);
         }
-            // 模式 1(Normal) 或 2(Silhouette)
         else {
             visShader->use();
-            visShader->setInt("u_VisMode", renderMode); // 1=Normal, 2=Silhouette
+            visShader->setInt("u_VisMode", renderMode);
             visShader->setMat4("model", modelMatrix);
             targetModel->Draw(visShader->ID);
         }

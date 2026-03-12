@@ -13,7 +13,6 @@
 
 namespace Scene {
 
-    // ---- 小工具：用 std::isfinite 做分量检查（不依赖 glm::isfinite）----
     static inline bool IsFiniteVec3(const glm::vec3& v) {
         return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
     }
@@ -36,14 +35,13 @@ namespace Scene {
     void Model::loadModel(std::string const &path) {
         Assimp::Importer importer;
 
-        // ✅ 关键：不要强制 GenSmoothNormals，否则 ref/opt 只要 mesh 切分不同就可能重建出不同法线
-        // 只 Triangulate / FlipUVs / CalcTangentSpace 等保持一致即可
+        // 【修改点】移除了 aiProcess_CalcTangentSpace，避免 Assimp 根据 UV 边界强行拆分顶点，保证纯几何法线一致性
         const aiScene* scene = importer.ReadFile(
                 path,
                 aiProcess_Triangulate |
                 aiProcess_FlipUVs |
-                aiProcess_CalcTangentSpace |
-                aiProcess_JoinIdenticalVertices
+                aiProcess_JoinIdenticalVertices |
+                aiProcess_GenSmoothNormals
         );
 
         if(!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
@@ -51,9 +49,6 @@ namespace Scene {
             return;
         }
 
-        // ⚠️ 注意：Assimp::Importer 在函数结束会释放 scene，所以这里存 scenePtr 是危险的。
-        // 你原工程里确实这么做了。严格做法是：把 importer 作为成员保存，或把需要的数据拷贝出来。
-        // 这里为了“不改变你工程结构”，仍沿用原逻辑，但建议你后续把 importer 变成 Model 的成员。
         this->scenePtr = scene;
 
         std::filesystem::path p(path);
@@ -78,11 +73,10 @@ namespace Scene {
         std::vector<Texture> textures;
         MaterialProps matProps;
 
-        // 1) 顶点
         for(unsigned int i = 0; i < mesh->mNumVertices; i++) {
             Vertex vertex;
-
             glm::vec3 v;
+
             v.x = mesh->mVertices[i].x;
             v.y = mesh->mVertices[i].y;
             v.z = mesh->mVertices[i].z;
@@ -94,7 +88,6 @@ namespace Scene {
                 v.z = mesh->mNormals[i].z;
                 vertex.Normal = v;
             } else {
-                // 没法线才给一个兜底
                 vertex.Normal = glm::vec3(0.0f, 1.0f, 0.0f);
             }
 
@@ -104,17 +97,9 @@ namespace Scene {
                 uv.y = mesh->mTextureCoords[0][i].y;
                 vertex.TexCoords = uv;
 
-                if (mesh->HasTangentsAndBitangents()) {
-                    v.x = mesh->mTangents[i].x;
-                    v.y = mesh->mTangents[i].y;
-                    v.z = mesh->mTangents[i].z;
-                    vertex.Tangent = v;
-
-                    v.x = mesh->mBitangents[i].x;
-                    v.y = mesh->mBitangents[i].y;
-                    v.z = mesh->mBitangents[i].z;
-                    vertex.Bitangent = v;
-                }
+                // 由于移除了计算切线空间的 Flag，这里不再读取切线，给默认值
+                vertex.Tangent = glm::vec3(1.0f, 0.0f, 0.0f);
+                vertex.Bitangent = glm::vec3(0.0f, 1.0f, 0.0f);
             } else {
                 vertex.TexCoords = glm::vec2(0.0f, 0.0f);
             }
@@ -122,40 +107,27 @@ namespace Scene {
             vertices.push_back(vertex);
         }
 
-        // 2) 索引
         for(unsigned int i = 0; i < mesh->mNumFaces; i++) {
             aiFace face = mesh->mFaces[i];
             for(unsigned int j = 0; j < face.mNumIndices; j++)
                 indices.push_back(face.mIndices[j]);
         }
 
-        // 3) 材质/纹理（保持你原来的逻辑）
         if (mesh->mMaterialIndex >= 0) {
             aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
             bool hasAlbedo = false;
 
-            // BaseColor -> Diffuse -> Emissive
             std::vector<Texture> baseMaps = loadMaterialTextures(material, aiTextureType_BASE_COLOR, "albedoMap");
-            if(!baseMaps.empty()) {
-                textures.insert(textures.end(), baseMaps.begin(), baseMaps.end());
-                hasAlbedo = true;
-            }
+            if(!baseMaps.empty()) { textures.insert(textures.end(), baseMaps.begin(), baseMaps.end()); hasAlbedo = true; }
 
             if(!hasAlbedo) {
                 std::vector<Texture> diffuseMaps = loadMaterialTextures(material, aiTextureType_DIFFUSE, "albedoMap");
-                if(!diffuseMaps.empty()) {
-                    textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end());
-                    hasAlbedo = true;
-                }
+                if(!diffuseMaps.empty()) { textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end()); hasAlbedo = true; }
             }
 
             if(!hasAlbedo) {
                 std::vector<Texture> emissiveMaps = loadMaterialTextures(material, aiTextureType_EMISSIVE, "albedoMap");
-                if(!emissiveMaps.empty()) {
-                    textures.insert(textures.end(), emissiveMaps.begin(), emissiveMaps.end());
-                    hasAlbedo = true;
-                    std::cout << "[Model] Found texture in EMISSIVE channel." << std::endl;
-                }
+                if(!emissiveMaps.empty()) { textures.insert(textures.end(), emissiveMaps.begin(), emissiveMaps.end()); hasAlbedo = true; }
             }
 
             std::vector<Texture> normalMaps = loadMaterialTextures(material, aiTextureType_NORMALS, "normalMap");
@@ -165,11 +137,8 @@ namespace Scene {
             textures.insert(textures.end(), armMaps.begin(), armMaps.end());
 
             aiColor4D color;
-            if (AI_SUCCESS == material->Get(AI_MATKEY_BASE_COLOR, color)) {
-                matProps.baseColor = glm::vec4(color.r, color.g, color.b, color.a);
-            } else if (AI_SUCCESS == material->Get(AI_MATKEY_COLOR_DIFFUSE, color)) {
-                matProps.baseColor = glm::vec4(color.r, color.g, color.b, color.a);
-            }
+            if (AI_SUCCESS == material->Get(AI_MATKEY_BASE_COLOR, color)) matProps.baseColor = glm::vec4(color.r, color.g, color.b, color.a);
+            else if (AI_SUCCESS == material->Get(AI_MATKEY_COLOR_DIFFUSE, color)) matProps.baseColor = glm::vec4(color.r, color.g, color.b, color.a);
 
             float val;
             if (AI_SUCCESS == material->Get(AI_MATKEY_METALLIC_FACTOR, val)) matProps.metallic = val;
@@ -184,7 +153,6 @@ namespace Scene {
         for(unsigned int i = 0; i < mat->GetTextureCount(type); i++) {
             aiString str;
             mat->GetTexture(type, i, &str);
-
             bool skip = false;
             for(unsigned int j = 0; j < textures_loaded.size(); j++) {
                 if(std::strcmp(textures_loaded[j].path.data(), str.C_Str()) == 0) {
@@ -192,7 +160,6 @@ namespace Scene {
                     skip = true; break;
                 }
             }
-
             if(!skip) {
                 Texture texture;
                 texture.id = TextureFromFile(str.C_Str(), this->directory, this->scenePtr);
@@ -221,17 +188,9 @@ namespace Scene {
 
         if (embeddedTex) {
             if (embeddedTex->mHeight == 0) {
-                data = stbi_load_from_memory(
-                        reinterpret_cast<const unsigned char*>(embeddedTex->pcData),
-                        embeddedTex->mWidth,
-                        &width, &height, &nrComponents, 0
-                );
+                data = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTex->pcData), embeddedTex->mWidth, &width, &height, &nrComponents, 0);
             } else {
-                data = stbi_load_from_memory(
-                        reinterpret_cast<const unsigned char*>(embeddedTex->pcData),
-                        embeddedTex->mWidth * embeddedTex->mHeight * 4,
-                        &width, &height, &nrComponents, 0
-                );
+                data = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(embeddedTex->pcData), embeddedTex->mWidth * embeddedTex->mHeight * 4, &width, &height, &nrComponents, 0);
             }
         } else {
             std::filesystem::path p = std::filesystem::path(texDirectory) / filename;
@@ -287,29 +246,22 @@ namespace Scene {
         glm::vec3 center = (boundsMin + boundsMax) * 0.5f;
         glm::vec3 size = boundsMax - boundsMin;
 
-        // ✅ 这里用 std::isfinite 的分量检查，避免 glm::isfinite 兼容性问题
         if (!IsFiniteVec3(center) || !IsFiniteVec3(size)) {
-            std::cout << "[Model] computeBoundingBox got non-finite values, skip normalization." << std::endl;
             modelMatrix = glm::mat4(1.0f);
             return;
         }
 
         float maxDim = std::max(std::max(size.x, size.y), size.z);
         if (!std::isfinite(maxDim) || maxDim <= 1e-8f) {
-            std::cout << "[Model] maxDim invalid, skip normalization." << std::endl;
             modelMatrix = glm::mat4(1.0f);
             return;
         }
 
+        // 保持 2.0f / maxDim，这会让模型贴合 NDC [-1, 1] 的边界，最大化屏幕利用率，对误差计算更有利
         float scaleFactor = 2.0f / maxDim;
 
-        // 注意：矩阵顺序保持你原逻辑（先 scale 再 translate）
         modelMatrix = glm::mat4(1.0f);
         modelMatrix = glm::scale(modelMatrix, glm::vec3(scaleFactor));
         modelMatrix = glm::translate(modelMatrix, -center);
-
-        std::cout << "Model Normalized. Center: " << center.x << " " << center.y << " " << center.z
-                  << " Scale: " << scaleFactor << std::endl;
     }
-
-} // namespace Scene
+}

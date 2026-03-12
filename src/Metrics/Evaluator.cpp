@@ -53,17 +53,37 @@ namespace Metrics {
         }
 
         double sumSqDiff = 0.0;
-        size_t totalComponents = nMap1.size();
+        size_t validPixels = 0;
+        size_t totalPixels = nMap1.size() / 3;
 
-        for (size_t i = 0; i < totalComponents; ++i) {
-            double v1 = static_cast<double>(nMap1[i]);
-            double v2 = static_cast<double>(nMap2[i]);
+        for (size_t i = 0; i < totalPixels; ++i) {
+            float r1 = nMap1[i * 3 + 0];
+            float g1 = nMap1[i * 3 + 1];
+            float b1 = nMap1[i * 3 + 2];
 
-            double diff = v1 - v2;
-            sumSqDiff += diff * diff;
+            float r2 = nMap2[i * 3 + 0];
+            float g2 = nMap2[i * 3 + 1];
+            float b2 = nMap2[i * 3 + 2];
+
+            // 【修改点】由于 shader 中法线执行了 N*0.5+0.5，一个合法的几何法线转换后不可能出现绝对的(0,0,0)
+            // 所以，出现 0,0,0 一定是我们刚刚在 glClearBufferfv 中强制刷新的背景。跳过它，防止背景拉低均值。
+            if (r1 == 0.0f && g1 == 0.0f && b1 == 0.0f &&
+                r2 == 0.0f && g2 == 0.0f && b2 == 0.0f) {
+                continue;
+            }
+
+            double dr = static_cast<double>(r1 - r2);
+            double dg = static_cast<double>(g1 - g2);
+            double db = static_cast<double>(b1 - b2);
+
+            sumSqDiff += (dr*dr + dg*dg + db*db);
+            validPixels++;
         }
 
-        return sumSqDiff / static_cast<double>(totalComponents);
+        if (validPixels == 0) return 0.0;
+
+        // 计算 MSE，因为各通道差值在 [0,1]，计算出的均值严格处于 [0, 1] 范围
+        return sumSqDiff / (static_cast<double>(validPixels) * 3.0);
     }
 
     double Evaluator::ComputeSilhouetteError(
@@ -78,15 +98,9 @@ namespace Metrics {
 
         double sumSqDiff = 0.0;
         for (size_t i = 0; i < sil1.size(); ++i) {
-            // 确保二值化：有模型为1.0，无模型为0.0
             double v1 = (sil1[i] > 0) ? 1.0 : 0.0;
             double v2 = (sil2[i] > 0) ? 1.0 : 0.0;
-
-            // [修改点1] 核心修复：使用绝对差值计算误差
-            // 只有当两者完全一致(1,1 或 0,0)时 diff 为 0
-            // 只要有一个不一样(1,0 或 0,1)，diff 就为 1 (误差)
             double diff = std::abs(v1 - v2);
-
             sumSqDiff += diff * diff;
         }
 
@@ -112,7 +126,6 @@ namespace Metrics {
             floatB = 0.0f;
         }
 
-        // 使用平滑函数增强视觉效果
         float pi = 3.1415926f;
         auto smoothstep = [](float edge0, float edge1, float x) {
             x = std::max(0.0f, std::min(1.0f, (x - edge0) / (edge1 - edge0)));
@@ -136,17 +149,17 @@ namespace Metrics {
             int width, int height,
             int mode
     ) {
-        std::vector<unsigned char> heatmap(width * height * 4); // RGBA
+        std::vector<unsigned char> heatmap(width * height * 4);
 
         for (int i = 0; i < width * height; ++i) {
             bool isBackground = false;
 
             if (mode == 1) { // Normal
-                if (refFloats[i*3] == 0.0f && refFloats[i*3+1] == 0.0f && refFloats[i*3+2] == 0.0f) isBackground = true;
-                if (optFloats[i*3] == 0.0f && optFloats[i*3+1] == 0.0f && optFloats[i*3+2] == 0.0f) isBackground = true;
+                if (refFloats[i*3] == 0.0f && refFloats[i*3+1] == 0.0f && refFloats[i*3+2] == 0.0f &&
+                    optFloats[i*3] == 0.0f && optFloats[i*3+1] == 0.0f && optFloats[i*3+2] == 0.0f) {
+                    isBackground = true;
+                }
             } else { // Color/Silhouette
-                // 背景判定：只有当 Ref 和 Opt 都在该像素位置为 0 (黑色/无内容) 时，才视为背景
-                // 如果 Ref 有内容 (255) 而 Opt 没内容 (0)，则 isBackground = false，会进入误差计算逻辑
                 bool refIsBlack = (refBytes[i*3] == 0 && refBytes[i*3+1] == 0 && refBytes[i*3+2] == 0);
                 bool optIsBlack = (optBytes[i*3] == 0 && optBytes[i*3+1] == 0 && optBytes[i*3+2] == 0);
 
@@ -179,7 +192,7 @@ namespace Metrics {
                 float db = b1 - b2;
 
                 diff = std::sqrt(dr*dr + dg*dg + db*db);
-                diff *= 5.0f; // 放大误差
+                diff *= 5.0f;
             }
             else if (mode == 1) { // Normal
                 float n1x = refFloats[i * 3 + 0];
@@ -191,18 +204,18 @@ namespace Metrics {
                 float n2z = optFloats[i * 3 + 2];
 
                 auto toNormal = [](float v) { return v * 2.0f - 1.0f; };
-                float dot = toNormal(n1x) * toNormal(n2x) +
-                            toNormal(n1y) * toNormal(n2y) +
-                            toNormal(n1z) * toNormal(n2z);
 
-                diff = (1.0f - dot);
-                diff *= 2.0f;
+                // 还原至 [-1, 1]
+                float nx1 = toNormal(n1x), ny1 = toNormal(n1y), nz1 = toNormal(n1z);
+                float nx2 = toNormal(n2x), ny2 = toNormal(n2y), nz2 = toNormal(n2z);
+
+                float dot = nx1 * nx2 + ny1 * ny2 + nz1 * nz2;
+                dot = std::max(-1.0f, std::min(1.0f, dot));
+
+                // 【修改点】映射到 [0, 1] 区间。(1 - dot)/2，完全一致为0，完全相反为1
+                diff = (1.0f - dot) / 2.0f;
             }
             else if (mode == 2) { // Silhouette
-                // [修改点1] 轮廓热力图生成
-                // 使用绝对差值：
-                // Ref=1(255), Opt=0(0) -> abs(1-0) = 1.0 -> 红色 (漏缺)
-                // Ref=0(0), Opt=1(255) -> abs(0-1) = 1.0 -> 红色 (多余)
                 float v1 = refBytes[i * 3 + 0] / 255.0f;
                 float v2 = optBytes[i * 3 + 0] / 255.0f;
                 diff = std::abs(v1 - v2);
