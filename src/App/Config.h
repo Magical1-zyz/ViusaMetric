@@ -51,5 +51,10 @@ struct AppConfig {
         std::string hdrDir = "hdrtextures";
         std::string refDir = "refmodel";
         std::string optDir = "optmodel";
+
+        // 指定三个热力图标签的输出文件名 (将存放在 outputRoot 目录下)
+        std::string legendPsnr = "legend_psnr.png";
+        std::string legendNormal = "legend_normal.png";
+        std::string legendSilhouette = "legend_silhouette.png";
     } paths;
 };

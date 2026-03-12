@@ -32,6 +32,122 @@ void Application::SetupOutputDirectories(const std::string& modelName) {
     initLocalDir("psnr");
     initLocalDir("normal");
     initLocalDir("silhouette");
+
+    // ================= 根据 Config 分别生成三个图例 =================
+    // 提取一个通用的生成图例的 Lambda 表达式
+    auto generateLegend = [&](const std::string& filename, const std::string& topText, const std::string& midText, const std::string& bottomText) {
+        fs::path legendPath = root / filename;
+        if (!fs::exists(legendPath)) {
+            int legW = 120;  // 拓宽图像以容纳文字
+            int legH = 600;
+            int barW = 40;   // 左侧颜色条的宽度
+
+            // 初始化背景为暗灰色 (RGB: 40,40,40)，使白色文字和高对比度热力图更加清晰
+            std::vector<unsigned char> pixels(legW * legH * 3, 40);
+
+            // 【黑科技】内置 3x5 像素的点阵字体，支持数字 0-9 和小数点
+            const char* font[11] = {
+                    "111101101101111", // 0
+                    "010110010010111", // 1
+                    "111001111100111", // 2
+                    "111001111001111", // 3
+                    "101101111001001", // 4
+                    "111100111001111", // 5
+                    "111100111101111", // 6
+                    "111001010010010", // 7
+                    "111101111101111", // 8
+                    "111101111001111", // 9
+                    "000000000000010"  // .
+            };
+
+            // 绘制文字的 Lambda 闭包
+            auto drawText = [&](int startX, int startY, const std::string& text, int scale) {
+                for (char c : text) {
+                    int idx = -1;
+                    if (c >= '0' && c <= '9') idx = c - '0';
+                    else if (c == '.') idx = 10;
+
+                    if (idx >= 0) {
+                        const char* bitmap = font[idx];
+                        for (int py = 0; py < 5; ++py) {
+                            for (int px = 0; px < 3; ++px) {
+                                if (bitmap[py * 3 + px] == '1') {
+                                    // 放大像素点
+                                    for(int sy = 0; sy < scale; ++sy) {
+                                        for(int sx = 0; sx < scale; ++sx) {
+                                            int drawX = startX + px * scale + sx;
+                                            int drawY = startY + py * scale + sy;
+                                            if(drawX >= 0 && drawX < legW && drawY >= 0 && drawY < legH) {
+                                                int pIdx = (drawY * legW + drawX) * 3;
+                                                pixels[pIdx+0] = 255; // 文字颜色：纯白
+                                                pixels[pIdx+1] = 255;
+                                                pixels[pIdx+2] = 255;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // 移动光标，准备画下一个字符 (字符宽 3 + 间距 1 = 4)
+                    startX += 4 * scale;
+                }
+            };
+
+            // 1. 绘制左侧的颜色渐变条
+            for (int y = 0; y < legH; ++y) {
+                float value = 1.0f - static_cast<float>(y) / static_cast<float>(legH - 1);
+                auto smoothstep = [](float edge0, float edge1, float x) {
+                    float t = std::max(0.0f, std::min(1.0f, (x - edge0) / (edge1 - edge0)));
+                    return t * t * (3.0f - 2.0f * t);
+                };
+                float pi = 3.1415926f;
+                float r = smoothstep(0.5f, 0.8f, value);
+                float g = std::sin(value * pi);
+                float b = smoothstep(0.5f, 0.2f, value);
+                unsigned char cR = static_cast<unsigned char>(r * 255.0f);
+                unsigned char cG = static_cast<unsigned char>(g * 255.0f);
+                unsigned char cB = static_cast<unsigned char>(b * 255.0f);
+
+                for (int x = 0; x < barW; ++x) {
+                    int idx = (y * legW + x) * 3;
+                    pixels[idx + 0] = cR;
+                    pixels[idx + 1] = cG;
+                    pixels[idx + 2] = cB;
+                }
+            }
+
+            // 2. 绘制右侧的数值标签
+            int textX = barW + 15;
+            int textScale = 3;  // 字体放大倍数
+            int charH = 5 * textScale;
+
+            drawText(textX, 10, topText, textScale);                              // 顶部 (红色/最大误差)
+            drawText(textX, (legH - charH) / 2, midText, textScale);              // 中部 (绿色/中等误差)
+            drawText(textX, legH - 10 - charH, bottomText, textScale);            // 底部 (蓝色/最小误差)
+
+            // 写入本地 PNG 文件
+            stbi_write_png(legendPath.string().c_str(), legW, legH, 3, pixels.data(), legW * 3);
+        }
+    };
+
+    // --- 动态计算标签并输出图例 ---
+
+    // 快速截取两位小数的格式化工具
+    auto formatFloat = [](float v) {
+        std::string s = std::to_string(v);
+        return s.substr(0, 4);
+    };
+
+    // PSNR 热力图的最大真实颜色误差 = 1.0 / 倍率
+    float psnrMax = 1.0f / config.render.colorErrorMultiplier;
+    std::string psnrTopStr = formatFloat(psnrMax);
+    std::string psnrMidStr = formatFloat(psnrMax / 2.0f);
+
+    generateLegend(config.paths.legendPsnr, psnrTopStr, psnrMidStr, "0.0");
+    generateLegend(config.paths.legendNormal, "1.0", "0.5", "0.0");
+    generateLegend(config.paths.legendSilhouette, "1.0", "0.5", "0.0");
+    // ====================================================================
 }
 
 void Application::AppendToGlobalCSV(const std::string& metricType, double avgError) {
