@@ -66,7 +66,8 @@ private:
 
     // --- 辅助函数 ---
     void SetupOutputDirectories(const std::string& modelName);
-    void AppendToGlobalCSV(const std::string& metricType, int viewIdx, double error);
+    void AppendToGlobalCSV(const std::string& metricType, double avgError);
+    void AppendToLocalCSV(const std::string& metricType, int viewIdx, double error);
     void SaveScreenshot(int viewIdx);
 
     // --- 纹理读取 ---

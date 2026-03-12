@@ -21,7 +21,19 @@ struct AppConfig {
         float metallicDefault = 0.0f;
         bool refPBR = true;
         bool optPBR = true;
-        glm::vec3 background = glm::vec3(0.0f, 0.0f, 0.0f);
+
+        bool showSkyboxPSNR = false;
+        bool showSkyBoxSilhouette = false;
+        bool showSkyBoxNormal = false;
+        glm::vec3 background = glm::vec3(1.0f, 1.0f, 1.0f);
+        glm::vec3 heatmapBackground = glm::vec3(1.0f, 1.0f, 1.0f);
+        glm::vec3 silhouetteColor = glm::vec3(0.0f, 0.0f, 0.0f);
+
+        // 颜色误差放大倍率 (用于 PSNR 阶段的热力图展示)
+        // 备注: 控制热力图对颜色误差的视觉灵敏度。
+        // 倍数为 2.5 时，意味着 25% 的 RGB 相对颜色差异就会在热力图上显示为最高误差(纯红)。
+        // 调大此值会让微小的误差显得更严重(飘红)，调小则会增加视觉宽容度。
+        float colorErrorMultiplier = 2.5f;
     } render;
 
     // 采样配置

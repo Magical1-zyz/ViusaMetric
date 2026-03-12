@@ -54,7 +54,11 @@ namespace Metrics {
                 const std::vector<unsigned char>& optBytes,
                 const std::vector<float>& optFloats,
                 int width, int height,
-                int mode
+                int mode,
+                unsigned char bgR = 0,
+                unsigned char bgG = 0,
+                unsigned char bgB = 0,
+                float errorMultiplier = 3.0f
         );
 
     private:

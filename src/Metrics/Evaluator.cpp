@@ -22,8 +22,8 @@ namespace Metrics {
         size_t totalPixels = img1.size();
 
         for (size_t i = 0; i < totalPixels; ++i) {
-            double v1 = static_cast<double>(img1[i]) / 255.0;
-            double v2 = static_cast<double>(img2[i]) / 255.0;
+            double v1 = static_cast<double>(img1[i]);
+            double v2 = static_cast<double>(img2[i]);
 
             double diff = v1 - v2;
             sumSqDiff += diff * diff;
@@ -33,7 +33,7 @@ namespace Metrics {
 
         if (mse < 1e-10) return {0.0, 99.99};
 
-        double maxVal = 1.0;
+        double maxVal = 255.0;
         double psnr = 10.0 * std::log10((maxVal * maxVal) / mse);
 
         return {mse, psnr};
@@ -147,7 +147,9 @@ namespace Metrics {
             const std::vector<unsigned char>& optBytes,
             const std::vector<float>& optFloats,
             int width, int height,
-            int mode
+            int mode,
+            unsigned char bgR, unsigned char bgG, unsigned char bgB,
+            float errorMultiplier
     ) {
         std::vector<unsigned char> heatmap(width * height * 4);
 
@@ -169,9 +171,9 @@ namespace Metrics {
             }
 
             if (isBackground) {
-                heatmap[i * 4 + 0] = 0;
-                heatmap[i * 4 + 1] = 0;
-                heatmap[i * 4 + 2] = 0;
+                heatmap[i * 4 + 0] = bgR;
+                heatmap[i * 4 + 1] = bgG;
+                heatmap[i * 4 + 2] = bgB;
                 heatmap[i * 4 + 3] = 255;
                 continue;
             }
@@ -192,7 +194,7 @@ namespace Metrics {
                 float db = b1 - b2;
 
                 diff = std::sqrt(dr*dr + dg*dg + db*db);
-                diff *= 5.0f;
+                diff *= errorMultiplier;
             }
             else if (mode == 1) { // Normal
                 float n1x = refFloats[i * 3 + 0];
@@ -212,7 +214,7 @@ namespace Metrics {
                 float dot = nx1 * nx2 + ny1 * ny2 + nz1 * nz2;
                 dot = std::max(-1.0f, std::min(1.0f, dot));
 
-                // 【修改点】映射到 [0, 1] 区间。(1 - dot)/2，完全一致为0，完全相反为1
+                // 映射到 [0, 1] 区间。(1 - dot)/2，完全一致为0，完全相反为1
                 diff = (1.0f - dot) / 2.0f;
             }
             else if (mode == 2) { // Silhouette

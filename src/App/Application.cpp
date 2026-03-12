@@ -16,12 +16,25 @@ void Application::SetupOutputDirectories(const std::string& modelName) {
     fs::path root = config.paths.outputRoot;
     fs::path base = root / modelName;
     if (!fs::exists(base)) fs::create_directories(base);
-    if (!fs::exists(base / "psnr")) fs::create_directories(base / "psnr");
-    if (!fs::exists(base / "normal")) fs::create_directories(base / "normal");
-    if (!fs::exists(base / "silhouette")) fs::create_directories(base / "silhouette");
+
+    // 局部目录生成闭包，顺便初始化局部 CSV 和它的表头
+    auto initLocalDir = [&](const std::string& dirName) {
+        fs::path dir = base / dirName;
+        if (!fs::exists(dir)) fs::create_directories(dir);
+
+        fs::path csvPath = dir / (modelName + "_metrics_" + dirName + ".csv");
+        std::ofstream f(csvPath);
+        if (f.is_open()) {
+            f << "ViewIndex,ErrorValue\n";
+        }
+    };
+
+    initLocalDir("psnr");
+    initLocalDir("normal");
+    initLocalDir("silhouette");
 }
 
-void Application::AppendToGlobalCSV(const std::string& metricType, int viewIdx, double error) {
+void Application::AppendToGlobalCSV(const std::string& metricType, double avgError) {
     std::string filename;
     if (metricType == "PSNR") filename = "metrics_psnr.csv";
     else if (metricType == "Normal") filename = "metrics_normal.csv";
@@ -31,7 +44,21 @@ void Application::AppendToGlobalCSV(const std::string& metricType, int viewIdx, 
     fs::path csvPath = fs::path(config.paths.outputRoot) / filename;
     std::ofstream csv(csvPath, std::ios::app);
     if (csv.is_open()) {
-        csv << currentModelName << "," << viewIdx << "," << error << "\n";
+        csv << currentModelName << "," << avgError << "\n";
+    }
+}
+
+void Application::AppendToLocalCSV(const std::string& metricType, int viewIdx, double error) {
+    std::string dirName;
+    if (metricType == "PSNR") dirName = "psnr";
+    else if (metricType == "Normal") dirName = "normal";
+    else if (metricType == "Silhouette") dirName = "silhouette";
+    else return;
+
+    fs::path csvPath = fs::path(config.paths.outputRoot) / currentModelName / dirName / (currentModelName + "_metrics_" + dirName + ".csv");
+    std::ofstream csv(csvPath, std::ios::app);
+    if (csv.is_open()) {
+        csv << viewIdx << "," << error << "\n";
     }
 }
 
@@ -75,11 +102,30 @@ std::vector<float> Application::ReadTextureDepth(unsigned int texID, int w, int 
 
 void Application::UploadGrayscaleToTexture(unsigned int texID, const std::vector<unsigned char>& data, int w, int h) {
     std::vector<unsigned char> rgba(w * h * 4);
+
+    // 获取 Config 中设置的纯色背景
+    unsigned char bgR = static_cast<unsigned char>(config.render.background.r * 255.0f);
+    unsigned char bgG = static_cast<unsigned char>(config.render.background.g * 255.0f);
+    unsigned char bgB = static_cast<unsigned char>(config.render.background.b * 255.0f);
+
+    // 取 Config 中设置的模型轮廓色
+    unsigned char silR = static_cast<unsigned char>(config.render.silhouetteColor.r * 255.0f);
+    unsigned char silG = static_cast<unsigned char>(config.render.silhouetteColor.g * 255.0f);
+    unsigned char silB = static_cast<unsigned char>(config.render.silhouetteColor.b * 255.0f);
+
     for (int i = 0; i < w * h; ++i) {
         unsigned char val = data[i];
-        rgba[i * 4 + 0] = val;
-        rgba[i * 4 + 1] = val;
-        rgba[i * 4 + 2] = val;
+        if (val == 0) {
+            // 若为剪影背景，则填入 config 的颜色
+            rgba[i * 4 + 0] = bgR;
+            rgba[i * 4 + 1] = bgG;
+            rgba[i * 4 + 2] = bgB;
+        } else {
+            // 值不为0，代表识别到了模型轮廓，填入我们指定的轮廓颜色
+            rgba[i * 4 + 0] = silR;
+            rgba[i * 4 + 1] = silG;
+            rgba[i * 4 + 2] = silB;
+        }
         rgba[i * 4 + 3] = 255;
     }
     glBindTexture(GL_TEXTURE_2D, texID);
@@ -209,15 +255,28 @@ void Application::UpdateState() {
             currentViewIdx = 0;
 
             double avgError = accumulatorError / (double)views.size();
-            std::string metricName;
 
-            if (currentPhase == RenderPhase::PHASE_IBL_PSNR) metricName = "Average PSNR (dB)";
-            else if (currentPhase == RenderPhase::PHASE_NORMAL) metricName = "Normal Error (MSE)";
-            else if (currentPhase == RenderPhase::PHASE_SILHOUETTE) metricName = "Silhouette Error (MSE)";
+            std::string metricName;
+            std::string shortName;
+
+            if (currentPhase == RenderPhase::PHASE_IBL_PSNR) {
+                metricName = "Average PSNR (dB)";
+                shortName = "PSNR";
+            }
+            else if (currentPhase == RenderPhase::PHASE_NORMAL) {
+                metricName = "Normal Error (MSE)";
+                shortName = "Normal";
+            }
+            else if (currentPhase == RenderPhase::PHASE_SILHOUETTE) {
+                metricName = "Silhouette Error (MSE)";
+                shortName = "Silhouette";
+            }
 
             std::cout << "\n========================================" << std::endl;
             std::cout << "[RESULT] " << metricName << ": " << avgError << std::endl;
             std::cout << "========================================\n" << std::endl;
+
+            AppendToGlobalCSV(shortName, avgError);
 
             accumulatorError = 0.0;
 
@@ -252,15 +311,15 @@ void Application::RenderPasses() {
 
     switch (phaseToDraw) {
         case RenderPhase::PHASE_IBL_PSNR:
-            drawSkybox = true;
+            drawSkybox = config.render.showSkyboxPSNR;
             renderMode = 0;
             break;
         case RenderPhase::PHASE_SILHOUETTE:
-            drawSkybox = false;
+            drawSkybox = config.render.showSkyBoxSilhouette;
             renderMode = 1;
             break;
         case RenderPhase::PHASE_NORMAL:
-            drawSkybox = false;
+            drawSkybox = config.render.showSkyBoxNormal;
             renderMode = 1;
             break;
     }
@@ -288,10 +347,8 @@ void Application::RenderPasses() {
 
     // 数据抓取 (CPU计算用)
     std::vector<float> refDepth, refNormals;
+    refDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
     if (currentPhase == RenderPhase::PHASE_SILHOUETTE || currentPhase == RenderPhase::PHASE_NORMAL) {
-        if (currentPhase == RenderPhase::PHASE_SILHOUETTE) {
-            refDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
-        }
         refNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
     }
 
@@ -303,7 +360,6 @@ void Application::RenderPasses() {
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER, renderer->GetFBO());
 
-    // [修改点2]：同上，Opt Model 也要切换读取源
     if (currentPhase == RenderPhase::PHASE_NORMAL) {
         glReadBuffer(GL_COLOR_ATTACHMENT1);
     } else {
@@ -317,10 +373,8 @@ void Application::RenderPasses() {
     glReadBuffer(GL_COLOR_ATTACHMENT0);
 
     std::vector<float> optDepth, optNormals;
+    optDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
     if (currentPhase == RenderPhase::PHASE_SILHOUETTE || currentPhase == RenderPhase::PHASE_NORMAL) {
-        if (currentPhase == RenderPhase::PHASE_SILHOUETTE) {
-            optDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
-        }
         optNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
     }
 
@@ -339,6 +393,40 @@ void Application::RenderPasses() {
         // 这是正确的，因为法线 (0,0,0) 是非法的，可以用来判断背景（如果 Shader 清屏是 0）
         refBytes = ReadTextureByte(targets.texRef, targets.width, targets.height);
         optBytes = ReadTextureByte(targets.texOpt, targets.width, targets.height);
+
+        // 为了使展示和保存的图片具备设定的背景色，我们对用于展示的纹理背景进行染色
+        unsigned char bgR = static_cast<unsigned char>(config.render.background.r * 255.0f);
+        unsigned char bgG = static_cast<unsigned char>(config.render.background.g * 255.0f);
+        unsigned char bgB = static_cast<unsigned char>(config.render.background.b * 255.0f);
+
+        std::vector<unsigned char> refUpload(targets.width * targets.height * 4);
+        std::vector<unsigned char> optUpload(targets.width * targets.height * 4);
+
+        for (int i = 0; i < targets.width * targets.height; ++i) {
+            // 利用准确的浮点精度判断是否为清屏背景色 (0, 0, 0)
+            bool refIsBg = (refFloats[i*3] == 0.0f && refFloats[i*3+1] == 0.0f && refFloats[i*3+2] == 0.0f);
+            if (refIsBg) {
+                refUpload[i*4+0] = bgR; refUpload[i*4+1] = bgG; refUpload[i*4+2] = bgB;
+            } else {
+                refUpload[i*4+0] = refBytes[i*3+0]; refUpload[i*4+1] = refBytes[i*3+1]; refUpload[i*4+2] = refBytes[i*3+2];
+            }
+            refUpload[i*4+3] = 255;
+
+            bool optIsBg = (optFloats[i*3] == 0.0f && optFloats[i*3+1] == 0.0f && optFloats[i*3+2] == 0.0f);
+            if (optIsBg) {
+                optUpload[i*4+0] = bgR; optUpload[i*4+1] = bgG; optUpload[i*4+2] = bgB;
+            } else {
+                optUpload[i*4+0] = optBytes[i*3+0]; optUpload[i*4+1] = optBytes[i*3+1]; optUpload[i*4+2] = optBytes[i*3+2];
+            }
+            optUpload[i*4+3] = 255;
+        }
+
+        // 将上了背景色的图片重新覆盖至 GPU，供下方的 Visualizer 渲染以及保存截图时使用
+        glBindTexture(GL_TEXTURE_2D, targets.texRef);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, targets.width, targets.height, GL_RGBA, GL_UNSIGNED_BYTE, refUpload.data());
+
+        glBindTexture(GL_TEXTURE_2D, targets.texOpt);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, targets.width, targets.height, GL_RGBA, GL_UNSIGNED_BYTE, optUpload.data());
     }
     else if(currentPhase == RenderPhase::PHASE_SILHOUETTE){
         std::vector<unsigned char> refSil = Metrics::ImageUtils::GenerateSilhouetteCPU(
@@ -362,24 +450,71 @@ void Application::RenderPasses() {
     }
     else {
         // PSNR
+        // PSNR
         refBytes = ReadTextureByte(targets.texRef, targets.width, targets.height);
         optBytes = ReadTextureByte(targets.texOpt, targets.width, targets.height);
+
+        // 1. 先使用原始包含背景的画面计算出正确的 PSNR
         auto res = Metrics::Evaluator::ComputePSNR(refBytes, optBytes, targets.width, targets.height);
         currentViewError = res.second;
-    }
 
-    accumulatorError += currentViewError;
+        // ================= PSNR 背景色替换逻辑 =================
+        unsigned char bgR = static_cast<unsigned char>(config.render.heatmapBackground.r * 255.0f);
+        unsigned char bgG = static_cast<unsigned char>(config.render.heatmapBackground.g * 255.0f);
+        unsigned char bgB = static_cast<unsigned char>(config.render.heatmapBackground.b * 255.0f);
+
+        std::vector<unsigned char> refUpload(targets.width * targets.height * 4);
+        std::vector<unsigned char> optUpload(targets.width * targets.height * 4);
+
+        for (int i = 0; i < targets.width * targets.height; ++i) {
+            // 利用深度缓冲识别背景（深度趋近于 1.0 的必定是背景或天空盒）
+            bool refIsBg = (refDepth[i] >= 0.9999f);
+            if (refIsBg) {
+                // 上传用的展示图填入 Config 背景色
+                refUpload[i*4+0] = bgR; refUpload[i*4+1] = bgG; refUpload[i*4+2] = bgB;
+                // 将 refBytes 置黑，确保下方的 GenerateHeatmap 能成功判定 isBackground = true
+                refBytes[i*3+0] = 0; refBytes[i*3+1] = 0; refBytes[i*3+2] = 0;
+            } else {
+                refUpload[i*4+0] = refBytes[i*3+0]; refUpload[i*4+1] = refBytes[i*3+1]; refUpload[i*4+2] = refBytes[i*3+2];
+            }
+            refUpload[i*4+3] = 255;
+
+            bool optIsBg = (optDepth[i] >= 0.9999f);
+            if (optIsBg) {
+                optUpload[i*4+0] = bgR; optUpload[i*4+1] = bgG; optUpload[i*4+2] = bgB;
+                optBytes[i*3+0] = 0; optBytes[i*3+1] = 0; optBytes[i*3+2] = 0;
+            } else {
+                optUpload[i*4+0] = optBytes[i*3+0]; optUpload[i*4+1] = optBytes[i*3+1]; optUpload[i*4+2] = optBytes[i*3+2];
+            }
+            optUpload[i*4+3] = 255;
+        }
+
+        // 将上了背景色的纯净模型图片重新覆盖至 GPU
+        glBindTexture(GL_TEXTURE_2D, targets.texRef);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, targets.width, targets.height, GL_RGBA, GL_UNSIGNED_BYTE, refUpload.data());
+
+        glBindTexture(GL_TEXTURE_2D, targets.texOpt);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, targets.width, targets.height, GL_RGBA, GL_UNSIGNED_BYTE, optUpload.data());
+        currentViewError = res.second;
+    }
 
     int modeIdx = 0;
     if (currentPhase == RenderPhase::PHASE_IBL_PSNR) modeIdx = 0;
     else if (currentPhase == RenderPhase::PHASE_NORMAL) modeIdx = 1;
     else if (currentPhase == RenderPhase::PHASE_SILHOUETTE) modeIdx = 2;
 
+    // 获取 Config 中设置的背景色（如果上方代码已经声明过 bgR, bgG, bgB，可以直接复用）
+    unsigned char heatmapBgR = static_cast<unsigned char>(config.render.heatmapBackground.r * 255.0f);
+    unsigned char heatmapBgG = static_cast<unsigned char>(config.render.heatmapBackground.g * 255.0f);
+    unsigned char heatmapBgB = static_cast<unsigned char>(config.render.heatmapBackground.b * 255.0f);
+
     std::vector<unsigned char> heatmapData = Metrics::Evaluator::GenerateHeatmap(
             refBytes, refFloats,
             optBytes, optFloats,
             targets.width, targets.height,
-            modeIdx
+            modeIdx,
+            heatmapBgR, heatmapBgG, heatmapBgB,
+            config.render.colorErrorMultiplier
     );
 
     UpdateHeatmapTexture(heatmapData);
@@ -395,7 +530,11 @@ void Application::RenderPasses() {
         SaveScreenshot(currentViewIdx);
         std::string mName = (currentPhase == RenderPhase::PHASE_IBL_PSNR) ? "PSNR" :
                             (currentPhase == RenderPhase::PHASE_SILHOUETTE ? "Silhouette" : "Normal");
-        AppendToGlobalCSV(mName, currentViewIdx, currentViewError);
+        // 1. 写入当前视角的误差到单独的 CSV
+        AppendToLocalCSV(mName, currentViewIdx, currentViewError);
+
+        // 2. 在这里进行累加！确保每个视角只累加一次！
+        accumulatorError += currentViewError;
         lastSavedView = currentViewIdx;
     }
 }

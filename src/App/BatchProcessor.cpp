@@ -10,7 +10,7 @@ BatchProcessor::BatchProcessor(const AppConfig& cfg, Application& application)
 void BatchProcessor::InitSingleCSV(const fs::path& path) {
     std::ofstream f(path);
     if (f.is_open()) {
-        f << "ModelName,ViewIndex,ErrorValue\n";
+        f << "ModelName,AverageError\n";
         f.close();
     }
 }
