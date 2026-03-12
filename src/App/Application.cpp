@@ -281,6 +281,12 @@ bool Application::InitSystem() {
     renderer->SetExposure(config.render.exposure);
     renderer->SetBackground(config.render.background);
 
+    silhouetteShader = std::make_unique<Renderer::Shader>(
+            (config.paths.assetsRoot + "/shaders/metrics/quad.vert").c_str(),
+            (config.paths.assetsRoot + "/shaders/metrics/silhouette.frag").c_str()
+    );
+    glGenFramebuffers(1, &silFBO);
+
     return true;
 }
 
@@ -456,11 +462,40 @@ void Application::RenderPasses() {
     // 恢复读取缓冲区，以免影响后续操作
     glReadBuffer(GL_COLOR_ATTACHMENT0);
 
-    // 数据抓取 (CPU计算用)
     std::vector<float> refDepth, refNormals;
-    refDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
-    if (currentPhase == RenderPhase::PHASE_SILHOUETTE || currentPhase == RenderPhase::PHASE_NORMAL) {
-        refNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
+    std::vector<unsigned char> refSil;
+
+    // 【GPU 加速提取参考模型轮廓】
+    if (currentPhase == RenderPhase::PHASE_SILHOUETTE) {
+        glBindFramebuffer(GL_FRAMEBUFFER, silFBO);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, targets.texRef, 0);
+        glViewport(0, 0, targets.width, targets.height);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        silhouetteShader->use();
+        silhouetteShader->setInt("depthMap", 0);
+        silhouetteShader->setInt("normalMap", 1);
+        silhouetteShader->setVec2("texelSize", glm::vec2(1.0f / targets.width, 1.0f / targets.height));
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, renderer->GetDepthTex());
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, renderer->GetNormalTex());
+
+        RenderQuad();
+
+        // 直接从 GPU 读回算好的黑白轮廓图 (只读 R 通道)
+        refSil.resize(targets.width * targets.height);
+        glReadPixels(0, 0, targets.width, targets.height, GL_RED, GL_UNSIGNED_BYTE, refSil.data());
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    else {
+        // 只有在非 Silhouette 阶段，才需要将笨重的深度或法线数据搬运给 CPU
+        refDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
+        if (currentPhase == RenderPhase::PHASE_NORMAL) {
+            refNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
+        }
     }
 
     // --- Pass 2: OptModel ---
@@ -484,9 +519,36 @@ void Application::RenderPasses() {
     glReadBuffer(GL_COLOR_ATTACHMENT0);
 
     std::vector<float> optDepth, optNormals;
-    optDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
-    if (currentPhase == RenderPhase::PHASE_SILHOUETTE || currentPhase == RenderPhase::PHASE_NORMAL) {
-        optNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
+    std::vector<unsigned char> optSil;
+
+    // 【GPU 加速提取优化模型轮廓】
+    if (currentPhase == RenderPhase::PHASE_SILHOUETTE) {
+        glBindFramebuffer(GL_FRAMEBUFFER, silFBO);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, targets.texOpt, 0);
+        glViewport(0, 0, targets.width, targets.height);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        silhouetteShader->use();
+        silhouetteShader->setInt("depthMap", 0);
+        silhouetteShader->setInt("normalMap", 1);
+        silhouetteShader->setVec2("texelSize", glm::vec2(1.0f / targets.width, 1.0f / targets.height));
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, renderer->GetDepthTex());
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, renderer->GetNormalTex());
+
+        RenderQuad();
+
+        optSil.resize(targets.width * targets.height);
+        glReadPixels(0, 0, targets.width, targets.height, GL_RED, GL_UNSIGNED_BYTE, optSil.data());
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+    else {
+        optDepth = ReadTextureDepth(renderer->GetDepthTex(), targets.width, targets.height);
+        if (currentPhase == RenderPhase::PHASE_NORMAL) {
+            optNormals = ReadTextureFloat(renderer->GetNormalTex(), targets.width, targets.height);
+        }
     }
 
     // =========================================================
@@ -540,13 +602,6 @@ void Application::RenderPasses() {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, targets.width, targets.height, GL_RGBA, GL_UNSIGNED_BYTE, optUpload.data());
     }
     else if(currentPhase == RenderPhase::PHASE_SILHOUETTE){
-        std::vector<unsigned char> refSil = Metrics::ImageUtils::GenerateSilhouetteCPU(
-                refDepth, refNormals, targets.width, targets.height, 0.01f, 0.1f
-        );
-        std::vector<unsigned char> optSil = Metrics::ImageUtils::GenerateSilhouetteCPU(
-                optDepth, optNormals, targets.width, targets.height, 0.01f, 0.1f
-        );
-
         currentViewError = Metrics::Evaluator::ComputeSilhouetteError(refSil, optSil, targets.width, targets.height);
 
         UploadGrayscaleToTexture(targets.texRef, refSil, targets.width, targets.height);
@@ -646,4 +701,28 @@ void Application::RenderPasses() {
         accumulatorError += currentViewError;
         lastSavedView = currentViewIdx;
     }
+}
+
+void Application::RenderQuad() {
+    if (quadVAO == 0) {
+        float quadVertices[] = {
+                // positions        // texture Coords
+                -1.0f,  1.0f, 0.0f, 0.0f, 1.0f,
+                -1.0f, -1.0f, 0.0f, 0.0f, 0.0f,
+                1.0f,  1.0f, 0.0f, 1.0f, 1.0f,
+                1.0f, -1.0f, 0.0f, 1.0f, 0.0f,
+        };
+        glGenVertexArrays(1, &quadVAO);
+        glGenBuffers(1, &quadVBO);
+        glBindVertexArray(quadVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(3 * sizeof(float)));
+    }
+    glBindVertexArray(quadVAO);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glBindVertexArray(0);
 }

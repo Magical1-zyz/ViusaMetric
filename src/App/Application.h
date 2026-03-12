@@ -1,6 +1,7 @@
 #pragma once
 #include "App/Config.h"
 #include "Scene/Scene.h"
+#include "Renderer/Shader.h"
 
 // 前置声明
 namespace Renderer { class PBRRenderer; }
@@ -53,6 +54,12 @@ private:
         void Init(int w, int h);
         void Cleanup();
     } targets;
+
+    // ============ GPU轮廓提取所需资源 ============
+    std::unique_ptr<Renderer::Shader> silhouetteShader;
+    unsigned int silFBO = 0;
+    unsigned int quadVAO = 0, quadVBO = 0;
+    void RenderQuad(); // 渲染全屏四边形的方法
 
     // --- 逻辑状态 ---
     std::vector<Scene::CameraSample> views;
