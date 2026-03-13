@@ -48,11 +48,12 @@ void BatchProcessor::RunBatch() {
         if (entry.is_directory()) {
             std::string modelName = entry.path().filename().string();
 
-            // 使用 Utils 中的查找逻辑
-            fs::path refFile = Utils::FindFirstModelFile(entry.path());
+            // 查找refmodel
+            fs::path refFile = Utils::FindFirstModelFile(entry.path(), config.paths.refExtension);
 
+            // 查找optmodel
             fs::path optDirForModel = optRoot / modelName;
-            fs::path optFile = Utils::FindFirstModelFile(optDirForModel);
+            fs::path optFile = Utils::FindFirstModelFile(optDirForModel, config.paths.optExtension);
 
             // 3. 调度 Application
             if (!refFile.empty() && !optFile.empty()) {

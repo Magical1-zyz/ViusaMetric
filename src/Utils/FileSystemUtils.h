@@ -28,15 +28,25 @@ namespace Utils {
         }
         return "";
     }
-    inline std::filesystem::path FindFirstModelFile(const std::filesystem::path& dir) {
+    inline std::filesystem::path FindFirstModelFile(const std::filesystem::path& dir, const std::string& targetExt) {
         namespace fs = std::filesystem;
         if (!fs::exists(dir) || !fs::is_directory(dir)) return {};
+
+        // 统一格式化期望的后缀名（转小写，并确保有 "." 前缀）
+        std::string expectedExt = targetExt;
+        std::transform(expectedExt.begin(), expectedExt.end(), expectedExt.begin(), ::tolower);
+        if (!expectedExt.empty() && expectedExt[0] != '.') {
+            expectedExt = "." + expectedExt;
+        }
 
         for (const auto& entry : fs::directory_iterator(dir)) {
             if (entry.is_regular_file()) {
                 std::string ext = entry.path().extension().string();
-                // 简单的大小写判断，如有需要可转小写
-                if (ext == ".gltf" || ext == ".glb") {
+                // 统一将找到的文件后缀转为小写进行比较
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+
+                // 根据 Config 传入的扩展名进行精确匹配
+                if (ext == expectedExt) {
                     return entry.path();
                 }
             }

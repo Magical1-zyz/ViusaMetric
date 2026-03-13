@@ -45,12 +45,16 @@ struct AppConfig {
     // 路径配置
     struct Paths {
         std::string assetsRoot = "assets";
-        std::string outputRoot = "output";
+        std::string outputRoot = "output/ours";
 
         // 子目录 (相对于 assetsRoot)
         std::string hdrDir = "hdrtextures";
         std::string refDir = "refmodel";
-        std::string optDir = "optmodel";
+        std::string optDir = "optmodel/ours";
+
+        // 指定要搜索的模型文件类型（带或不带点都可以，如 ".obj" 或 "gltf"）
+        std::string refExtension = ".gltf";
+        std::string optExtension = ".gltf";
 
         // 指定三个热力图标签的输出文件名 (将存放在 outputRoot 目录下)
         std::string legendPsnr = "legend_psnr.png";
