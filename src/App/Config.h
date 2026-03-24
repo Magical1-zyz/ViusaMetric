@@ -45,7 +45,7 @@ struct AppConfig {
     // 路径配置
     struct Paths {
         std::string assetsRoot = "assets";
-        std::string outputRoot = "output/ours";
+        std::string outputRoot = "output/result/ours";
 
         // 子目录 (相对于 assetsRoot)
         std::string hdrDir = "hdrtextures";
